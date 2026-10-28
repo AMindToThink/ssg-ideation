@@ -208,6 +208,8 @@ def check_served_provider(
         problems.append(f"response.provider={body.get('provider')!r}")
     if data.get("provider_name") != expected_provider_name:
         problems.append(f"generation.provider_name={data.get('provider_name')!r}")
+    if body.get("service_tier") in FORBIDDEN_SERVICE_TIERS:
+        problems.append(f"response.service_tier={body.get('service_tier')!r}")
     if data.get("service_tier") in FORBIDDEN_SERVICE_TIERS:
         problems.append(f"generation.service_tier={data.get('service_tier')!r}")
     for pr in data.get("provider_responses") or []:
