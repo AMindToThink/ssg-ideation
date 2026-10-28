@@ -285,6 +285,13 @@ def test_service_tier_routing_fails(tmp_path: Path) -> None:
         do_call(FakeAPI(generation=generation_body(tier="flex")), out)
 
 
+def test_response_service_tier_fails(tmp_path: Path) -> None:
+    body = completion_body()
+    body["service_tier"] = "priority"
+    with pytest.raises(CallError, match="response.service_tier"):
+        do_call(FakeAPI(completion=(200, body)), tmp_path / "gen1_turn1.json")
+
+
 def test_moderation_refusal_is_recorded_not_raised(tmp_path: Path) -> None:
     out = tmp_path / "gen1_turn1.json"
     body = {"error": {"code": 403, "message": "flagged", "metadata": {"reasons": ["cyber"]}}}
