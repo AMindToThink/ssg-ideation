@@ -130,7 +130,7 @@ def preflight(
     models = {m["id"]: m for m in models_json["data"]}
     expected: dict[str, str] = {}
     for spec in specs:
-        required = ({"max_tokens"} | ({"reasoning"} if spec.effort is not None else set())
+        required = ({spec.max_tokens_param} | ({"reasoning"} if spec.effort is not None else set())
                     | ({"response_format"} if judge else set()))
         if spec.model_id not in models:
             raise RuntimeError(f"{spec.model_id} is not listed in /models")
