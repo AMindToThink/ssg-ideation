@@ -88,5 +88,5 @@ def test_summary_roundtrip_and_figure(tmp_path: Path, fixture: tuple[dict[Any, A
     write_summary(build_rows(MODELS, records, labels), tmp_path / "summary.csv")
     rows = read_summary(tmp_path / "summary.csv")
     assert rows[1]["hit"] is True and rows[1]["first_ssg_rank"] == 2
-    paths = make_figure(rows, tmp_path / "fig")
+    paths = make_figure(rows, tmp_path / "fig", note="A footnote.")
     assert all(p.exists() and p.stat().st_size > 0 for p in paths)
