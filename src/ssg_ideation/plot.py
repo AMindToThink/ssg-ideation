@@ -4,6 +4,7 @@ Usage:
     uv run python -m ssg_ideation.plot
 """
 
+import argparse
 import csv
 import sys
 from pathlib import Path
@@ -129,13 +130,15 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     ax.legend(handles=handles, frameon=False, fontsize=8, loc="lower right", labelcolor=INK_2, ncols=2)
 
 
-def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR) -> list[Path]:
+def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None) -> list[Path]:
     fig, (a, b) = plt.subplots(1, 2, figsize=(13, 4.8), facecolor=SURFACE)
     for ax in (a, b):
         _style(ax)
     panel_hit_rate(a, rows)
     panel_rank_strip(b, rows)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.05 if note else 0, 1, 1))
+    if note:
+        fig.text(0.01, 0.01, note, fontsize=8, color=INK_2, ha="left", va="bottom")
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = [out_dir / "ssg_ideation.png", out_dir / "ssg_ideation.pdf"]
     for p in paths:
@@ -144,8 +147,11 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR) -> list
     return paths
 
 
-def main() -> int:
-    for p in make_figure(read_summary()):
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--note", help="footnote printed under the figure")
+    args = ap.parse_args(argv)
+    for p in make_figure(read_summary(), note=args.note):
         print(f"wrote {p}")
     return 0
 
