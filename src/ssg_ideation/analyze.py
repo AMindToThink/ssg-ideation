@@ -77,10 +77,12 @@ def load_records(model_keys: list[str], raw_dir: Path = RAW_DIR) -> dict[tuple[s
     return out
 
 
-def load_labels(path: Path = LABELS_PATH) -> dict[tuple[str, int, int], dict[str, Any]]:
+def load_labels(
+    path: Path = LABELS_PATH, expected_model: str = JUDGE_MODEL.model_id
+) -> dict[tuple[str, int, int], dict[str, Any]]:
     data = json.loads(path.read_text())
-    if data["judge_model"] != JUDGE_MODEL.model_id:
-        raise ValueError(f"labels from {data['judge_model']}, expected {JUDGE_MODEL.model_id}")
+    if data["judge_model"] != expected_model:
+        raise ValueError(f"labels from {data['judge_model']}, expected {expected_model}")
     return {(r["model_key"], r["generation_index"], r["turn"]): r for r in data["results"]}
 
 
