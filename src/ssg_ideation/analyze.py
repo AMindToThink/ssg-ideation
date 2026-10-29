@@ -235,7 +235,7 @@ def visible_reasoning(msg: dict[str, Any]) -> str | None:
     return "\n\n".join(summaries) or None
 
 
-def claude_line(row: dict[str, Any]) -> list[str]:
+def claude_line(row: dict[str, Any], name: str = CLAUDE_NAME) -> list[str]:
     """The Claude Code Opus 5.5 verdict and note for one response, as report lines."""
     if row.get("claude_verdict") is None:
         return []
@@ -244,7 +244,7 @@ def claude_line(row: dict[str, Any]) -> list[str]:
         "borderline": f"borderline only, first at idea {row['claude_rank_any']}",
     }.get(row["claude_verdict"], row["claude_verdict"])
     note = f" {row['claude_note']}" if row["claude_note"] else ""
-    return [f"**{CLAUDE_NAME}:** {verdict}.{note}", ""]
+    return [f"**{name}:** {verdict}.{note}", ""]
 
 
 def _rank_text(row: dict[str, Any], labels: str) -> str:
@@ -254,7 +254,9 @@ def _rank_text(row: dict[str, Any], labels: str) -> str:
     return f"#{rank}/{row['n_ideas']}" if rank else f"miss ({row['n_ideas']} ideas)"
 
 
-def _response_section(rec: dict[str, Any], lab: dict[str, Any] | None, row: dict[str, Any]) -> list[str]:
+def _response_section(
+    rec: dict[str, Any], lab: dict[str, Any] | None, row: dict[str, Any], claude_name: str = CLAUDE_NAME
+) -> list[str]:
     msg = record_message(rec)
     out: list[str] = []
     reasoning = visible_reasoning(msg)
@@ -268,7 +270,7 @@ def _response_section(rec: dict[str, Any], lab: dict[str, Any] | None, row: dict
     if rec["outcome"] == "truncated":
         out += ["**Truncated** (finish_reason=length): the response below is cut off.", ""]
     out += ["<details open><summary>Response</summary>", "", msg["content"], "", "</details>", ""]
-    out += claude_line(row)
+    out += claude_line(row, claude_name)
     if lab is None:
         raise KeyError("missing judge label")
     out += [f"**Judge:** {'HIT' if lab['hit'] else 'miss'}, first SSG rank "
@@ -293,11 +295,16 @@ def render_report(
     records: dict[tuple[str, int, int], dict[str, Any]],
     labels: dict[tuple[str, int, int], dict[str, Any]],
     model_keys: list[str],
+    title: str = "SSG ideation test: full responses with labels",
+    intro: str | None = None,
+    claude_name: str = CLAUDE_NAME,
 ) -> str:
+    label_name = {"claude": f"{claude_name}, clear", "claude_any": f"{claude_name}, clear or borderline",
+                  "judge": LABEL_NAME["judge"]}
     lines = [
-        "# SSG ideation test: full responses with labels",
+        f"# {title}",
         "",
-        "Two label sources. The **Claude Code Opus 5.5 labels** were written by Claude Opus 5.5 in "
+        intro or "Two label sources. The **Claude Code Opus 5.5 labels** were written by Claude Opus 5.5 in "
         "Claude Code before the judge's labels were opened (results/claude_code_opus_spotcheck.md). "
         "Matthew spot-checked some of the responses where they disagree with the judge and sided "
         "with them, so they take priority; no person labeled every response. The **judge** is "
@@ -323,7 +330,7 @@ def render_report(
             for g in range(1, N_GENERATIONS + 1):
                 t = {r["turn"]: _rank_text(r, src) for r in rows if r["model_key"] == key and r["generation"] == g}
                 per_gen.append(f"gen{g}: " + "; ".join(t[turn] for turn in TURNS))
-            lines.append(f"| {model_by_key(key).label} | {LABEL_NAME[src]} | {c['turn1']}/{c['n']} | "
+            lines.append(f"| {model_by_key(key).label} | {label_name[src]} | {c['turn1']}/{c['n']} | "
                          f"{c['turn2']}/{c['n']} | {c['either']}/{c['n']} | {c['turn3']}/{c['n']} | "
                          f"{c['turn3_new']} | {c['refused']} | {'<br>'.join(per_gen)} |")
     lines += ["", "## Prompts", ""]
@@ -340,7 +347,7 @@ def render_report(
                     lines += ["Not run: an earlier turn was refused.", ""]
                     continue
                 row = next(r for r in rows if (r["model_key"], r["generation"], r["turn"]) == (key, gen, turn))
-                lines += _response_section(rec, labels.get((key, gen, turn)), row)
+                lines += _response_section(rec, labels.get((key, gen, turn)), row, claude_name)
     return "\n".join(lines)
 
 
