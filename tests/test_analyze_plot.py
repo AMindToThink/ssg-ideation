@@ -94,7 +94,7 @@ def test_report_contains_every_response(fixture: tuple[dict[Any, Any], dict[Any,
     assert report.count("### Generation") == 18
     assert "**Refused**" in report and "Not run: an earlier turn was refused." in report
     assert f"**Turn 3:** {TURN3_PROMPT}" in report
-    assert "| Gemini 4 Argon | 1/3 | 1/3 | 2/3 | 2/3 | 1 | 0 |" in report
+    assert "| Gemini 4 Argon | Judge (DeepSeek V4.1 Flash) | 1/3 | 1/3 | 2/3 | 2/3 | 1 | 0 |" in report
     assert "**Truncated**" in report
     assert "| 2 | idea 2 | YYY | **YES** |" in report
 
@@ -142,3 +142,33 @@ def test_claude_labels_replace_judge_hits(fixture: tuple[dict[Any, Any], dict[An
     assert hit_counts(with_claude_labels(rows, reader), "gemini-4-argon")["turn1"] == 1
     paths = make_figure(with_claude_labels(rows, reader), tmp_path, name="claude")
     assert [p.name for p in paths] == ["claude.png", "claude.pdf"]
+
+
+def test_claude_columns_counts_and_report_order(fixture: tuple[dict[Any, Any], dict[Any, Any]], tmp_path: Path) -> None:
+    records, labels = fixture
+    none = {"verdict": "miss", "clear": [], "borderline": [], "note": ""}
+    reader = {("gemini-4-argon", g, t): dict(none) for g in (1, 2, 3) for t in (1, 2, 3)}
+    reader |= {("claude-opus-5.5", g, 1): dict(none, verdict="refused") for g in (1, 2, 3)}
+    reader[("gemini-4-argon", 1, 2)] = {"verdict": "borderline", "clear": [], "borderline": [3], "note": "b"}
+    reader[("gemini-4-argon", 3, 1)] = {"verdict": "clear", "clear": [5], "borderline": [2], "note": "Says it."}
+    rows = build_rows(MODELS, records, labels, reader)
+    by = {(r["model_key"], r["generation"], r["turn"]): r for r in rows}
+    want = {"claude_verdict": "clear", "claude_hit": True, "claude_rank": 5, "claude_hit_any": True, "claude_rank_any": 2}
+    assert {k: by[("gemini-4-argon", 3, 1)][k] for k in want} == want
+    assert by[("claude-opus-5.5", 1, 2)]["claude_verdict"] == "not run"
+    assert hit_counts(rows, "gemini-4-argon", "claude")["turn1"] == 1
+    assert hit_counts(rows, "gemini-4-argon", "claude_any")["turn2"] == 1
+    assert hit_counts(rows, "gemini-4-argon", "judge")["turn2"] == 1
+    report = render_report(rows, records, labels, MODELS)
+    claude_row = report.index("| Gemini 4 Argon | Claude Code Opus 5.5 (spot-checked), clear |")
+    judge_row = report.index("| Gemini 4 Argon | Judge (DeepSeek V4.1 Flash) |")
+    assert claude_row < judge_row
+    section = report[report.index("### Generation 3, turn 1"):]
+    assert section.index("Claude Code Opus 5.5 (spot-checked):** clear statement, first at idea 5. Says it.") < section.index("**Judge:**")
+    write_summary(rows, tmp_path / "s.csv")
+    back = read_summary(tmp_path / "s.csv")
+    fields = list(back[0])
+    assert fields.index("claude_verdict") < fields.index("hit")
+    assert [r for r in back if r["generation"] == 3 and r["turn"] == 1 and r["model_key"] == "gemini-4-argon"][0]["claude_rank"] == 5
+    with pytest.raises(KeyError):
+        build_rows(MODELS, records, labels, {k: v for k, v in reader.items() if k != ("gemini-4-argon", 2, 2)})

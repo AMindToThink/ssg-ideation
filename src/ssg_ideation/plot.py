@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.axes import Axes  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
-from ssg_ideation.analyze import SUMMARY_PATH, hit_counts  # noqa: E402
+from ssg_ideation.analyze import SUMMARY_PATH, hit_counts, load_reader  # noqa: E402
 from ssg_ideation.config import FIGURES_DIR, N_GENERATIONS  # noqa: E402
 
 # Reference palette from the dataviz skill (light mode): categorical slots 1-4,
@@ -46,10 +46,12 @@ DEFAULT_NOTE = (
 def read_summary(path: Path = SUMMARY_PATH) -> list[dict[str, Any]]:
     def parse(r: dict[str, str]) -> dict[str, Any]:
         out: dict[str, Any] = dict(r)
-        for k in ("generation", "turn", "first_ssg_rank", "n_ideas"):
-            out[k] = int(r[k]) if r[k] else None
-        for k in ("hit", "refused", "truncated"):
-            out[k] = r[k] == "True"
+        for k in ("generation", "turn", "first_ssg_rank", "n_ideas", "claude_rank", "claude_rank_any"):
+            if k in r:
+                out[k] = int(r[k]) if r[k] else None
+        for k in ("hit", "refused", "truncated", "claude_hit", "claude_hit_any"):
+            if k in r:
+                out[k] = r[k] == "True"
         return out
 
     with path.open() as f:
@@ -211,8 +213,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--note", default=DEFAULT_NOTE, help="footnote for the judge-labeled figure")
     args = ap.parse_args(argv)
-    from ssg_ideation.explorer import load_reader  # explorer imports this module
-
     rows, reader = read_summary(), load_reader()
     paths = make_figure(rows, note=args.note)
     paths += make_figure(with_claude_labels(rows, reader), note=CLAUDE_NOTE.format(which="clear statements only"),
