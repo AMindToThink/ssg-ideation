@@ -292,6 +292,13 @@ def test_response_service_tier_fails(tmp_path: Path) -> None:
         do_call(FakeAPI(completion=(200, body)), tmp_path / "gen1_turn1.json")
 
 
+def test_response_cache_hit_fails(tmp_path: Path) -> None:
+    gen = generation_body()
+    gen["data"]["response_cache_source_id"] = "gen-older"
+    with pytest.raises(CallError, match="response cache"):
+        do_call(FakeAPI(generation=gen), tmp_path / "gen1_turn1.json")
+
+
 def test_moderation_refusal_is_recorded_not_raised(tmp_path: Path) -> None:
     out = tmp_path / "gen1_turn1.json"
     body = {"error": {"code": 403, "message": "flagged", "metadata": {"reasons": ["cyber"]}}}
