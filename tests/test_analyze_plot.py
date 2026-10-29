@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from ssg_ideation.analyze import build_rows, hit_counts, render_report, write_summary
+from ssg_ideation.analyze import build_rows, hit_counts, render_report, visible_reasoning, write_summary
 from ssg_ideation.config import TURN3_PROMPT
 from ssg_ideation.plot import drop_unanswered, make_figure, read_summary
 
@@ -115,3 +115,12 @@ def test_figure_drops_models_with_no_answered_call(fixture: tuple[dict[Any, Any]
     assert dropped == ["Claude Opus 5.5"]
     assert {r["model_key"] for r in kept} == {"gemini-4-argon"}
     assert len(kept) == 9
+
+
+def test_visible_reasoning_falls_back_to_summaries() -> None:
+    assert visible_reasoning({"reasoning": "plain", "reasoning_details": []}) == "plain"
+    details = [{"type": "reasoning.encrypted", "data": "x"},
+               {"type": "reasoning.summary", "summary": "first"},
+               {"type": "reasoning.summary", "summary": "second"}]
+    assert visible_reasoning({"reasoning": "", "reasoning_details": details}) == "first\n\nsecond"
+    assert visible_reasoning({"reasoning": None, "reasoning_details": details[:1]}) is None
