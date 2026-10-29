@@ -12,7 +12,8 @@ Results: `results/report.md` (every response in full, with judge labels inline),
 `results/claude_code_opus_spotcheck.md` (labels written by Claude Opus 5.5 in Claude Code, which
 read every response before opening the judge's labels; no person labeled the responses). Matthew
 spot-checked some of the responses where these labels and the judge disagree and sided with these
-labels; the explorer shows them by default.
+labels; the explorer shows them by default. `summary.csv` and `report.md` show
+both label sources, the Claude Code Opus 5.5 labels first (`claude_*` columns), then the judge's.
 `results/reader_labels.csv` puts those Claude Code Opus 5.5 labels on the judge's idea numbering, and
 `uv run python -m ssg_ideation.explorer` writes `results/explorer/{responses,ideas}.json`, the
 data behind the interactive explorer (a private claude.ai dashboard).

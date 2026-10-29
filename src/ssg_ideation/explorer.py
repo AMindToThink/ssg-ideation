@@ -11,21 +11,18 @@ Usage:
 """
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from ssg_ideation.analyze import SUMMARY_PATH, load_labels, load_records
+from ssg_ideation.analyze import SUMMARY_PATH, load_labels, load_reader, load_records
 from ssg_ideation.client import write_json_atomic
 from ssg_ideation.config import RESULTS_DIR, TARGET_MODELS
 from ssg_ideation.judge import _QUOTES, judge_content
 from ssg_ideation.plot import read_summary
 
-READER_PATH: Path = RESULTS_DIR / "reader_labels.csv"
 EXPLORER_DIR: Path = RESULTS_DIR / "explorer"
-READER_VERDICTS: frozenset[str] = frozenset({"clear", "borderline", "miss", "refused"})
 
 
 def normalized_with_offsets(text: str) -> tuple[str, list[int]]:
@@ -74,27 +71,6 @@ def idea_texts(response: str, anchors: list[str]) -> list[str]:
     if any(t >= 0 for t in tail):
         ends[-1] = min(t for t in tail if t >= 0)
     return [response[s:e].strip().removesuffix("---").strip() for s, e in zip(starts, ends, strict=True)]
-
-
-def _indices(cell: str) -> list[int]:
-    return [int(x) for x in cell.split()]
-
-
-def load_reader(path: Path = READER_PATH) -> dict[tuple[str, int, int], dict[str, Any]]:
-    out: dict[tuple[str, int, int], dict[str, Any]] = {}
-    with path.open() as f:
-        for r in csv.DictReader(f):
-            k = (r["model_key"], int(r["generation"]), int(r["turn"]))
-            clear, border = _indices(r["clear"]), _indices(r["borderline"])
-            if r["verdict"] not in READER_VERDICTS:
-                raise ValueError(f"{k}: unknown verdict {r['verdict']!r}")
-            implied = "clear" if clear else "borderline" if border else r["verdict"]
-            if implied != r["verdict"] or (r["verdict"] in ("miss", "refused") and (clear or border)):
-                raise ValueError(f"{k}: verdict {r['verdict']!r} does not match clear={clear} borderline={border}")
-            if k in out:
-                raise ValueError(f"{k}: duplicate reader label")
-            out[k] = {"verdict": r["verdict"], "clear": clear, "borderline": border, "note": r["note"]}
-    return out
 
 
 def build(
