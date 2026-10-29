@@ -4,7 +4,8 @@ from typing import Any
 import pytest
 
 from ssg_ideation.analyze import build_rows, hit_counts, render_report, write_summary
-from ssg_ideation.plot import make_figure, read_summary
+from ssg_ideation.config import TURN3_PROMPT
+from ssg_ideation.plot import drop_unanswered, make_figure, read_summary
 
 MODELS = ["gemini-4-argon", "claude-opus-5.5"]
 
@@ -38,13 +39,15 @@ def label(hit: bool, rank: int | None = None, n: int = 5) -> dict[str, Any]:
 def fixture() -> tuple[dict[Any, Any], dict[Any, Any]]:
     records: dict[Any, Any] = {}
     labels: dict[Any, Any] = {}
-    # Gemini: gen1 miss then hit at #2; gen2 hit at #4 in turn 1; gen3 truncated miss, miss.
-    plan = {(1, 1): label(False), (1, 2): label(True, 2, 6), (2, 1): label(True, 4, 12),
-            (2, 2): label(False), (3, 1): label(False), (3, 2): label(False)}
+    # Gemini: gen1 miss, hit at #2, kept at #1 of its top 3; gen2 hit at #4 in turn 1, dropped
+    # from its top 3; gen3 truncated miss, miss, then SSG first appears in its top 3 at #2.
+    plan = {(1, 1): label(False), (1, 2): label(True, 2, 6), (1, 3): label(True, 1, 3),
+            (2, 1): label(True, 4, 12), (2, 2): label(False), (2, 3): label(False, n=3),
+            (3, 1): label(False), (3, 2): label(False), (3, 3): label(True, 2, 3)}
     for (g, t), lab in plan.items():
         records[("gemini-4-argon", g, t)] = record("truncated" if (g, t) == (3, 1) else "ok")
         labels[("gemini-4-argon", g, t)] = lab
-    # Opus: every turn 1 refused, turn 2 never run.
+    # Opus: every turn 1 refused, turns 2 and 3 never run.
     for g in (1, 2, 3):
         records[("claude-opus-5.5", g, 1)] = record("refused")
     return records, labels
@@ -53,7 +56,7 @@ def fixture() -> tuple[dict[Any, Any], dict[Any, Any]]:
 def test_build_rows_and_hit_counts(fixture: tuple[dict[Any, Any], dict[Any, Any]]) -> None:
     records, labels = fixture
     rows = build_rows(MODELS, records, labels)
-    assert len(rows) == 12
+    assert len(rows) == 18
     by = {(r["model_key"], r["generation"], r["turn"]): r for r in rows}
     assert by[("gemini-4-argon", 1, 2)]["rank_label"] == "#2/6"
     assert by[("gemini-4-argon", 2, 1)]["rank_label"] == "#4/12"
@@ -64,14 +67,22 @@ def test_build_rows_and_hit_counts(fixture: tuple[dict[Any, Any], dict[Any, Any]
     assert by[("gemini-4-argon", 3, 1)]["truncated"] is True
     assert by[("claude-opus-5.5", 1, 1)]["status"] == "refused"
     assert by[("claude-opus-5.5", 1, 2)]["status"] == "skipped_after_refusal"
-    assert hit_counts(rows, "gemini-4-argon") == {"turn1": 1, "turn2": 1, "either": 2, "refused": 0, "n": 3}
-    assert hit_counts(rows, "claude-opus-5.5") == {"turn1": 0, "turn2": 0, "either": 0, "refused": 3, "n": 3}
+    assert by[("claude-opus-5.5", 1, 3)]["status"] == "skipped_after_refusal"
+    assert by[("gemini-4-argon", 1, 3)]["rank_label"] == "#1/3"
+    assert hit_counts(rows, "gemini-4-argon") == {
+        "turn1": 1, "turn2": 1, "either": 2, "turn3": 2, "turn3_new": 1, "refused": 0, "n": 3
+    }
+    assert hit_counts(rows, "claude-opus-5.5") == {
+        "turn1": 0, "turn2": 0, "either": 0, "turn3": 0, "turn3_new": 0, "refused": 3, "n": 3
+    }
 
 
 def test_missing_record_or_label_raises(fixture: tuple[dict[Any, Any], dict[Any, Any]]) -> None:
     records, labels = fixture
     with pytest.raises(FileNotFoundError):
         build_rows(MODELS, {k: v for k, v in records.items() if k != ("gemini-4-argon", 2, 2)}, labels)
+    with pytest.raises(FileNotFoundError):
+        build_rows(MODELS, {k: v for k, v in records.items() if k != ("gemini-4-argon", 2, 3)}, labels)
     with pytest.raises(KeyError):
         build_rows(MODELS, records, {k: v for k, v in labels.items() if k != ("gemini-4-argon", 2, 2)})
 
@@ -80,8 +91,10 @@ def test_report_contains_every_response(fixture: tuple[dict[Any, Any], dict[Any,
     records, labels = fixture
     rows = build_rows(MODELS, records, labels)
     report = render_report(rows, records, labels, MODELS)
-    assert report.count("### Generation") == 12
-    assert "**Refused**" in report and "Not run: turn 1 was refused." in report
+    assert report.count("### Generation") == 18
+    assert "**Refused**" in report and "Not run: an earlier turn was refused." in report
+    assert f"**Turn 3:** {TURN3_PROMPT}" in report
+    assert "| Gemini 4 Argon | 1/3 | 1/3 | 2/3 | 2/3 | 1 | 0 |" in report
     assert "**Truncated**" in report
     assert "| 2 | idea 2 | YYY | **YES** |" in report
 
@@ -93,3 +106,12 @@ def test_summary_roundtrip_and_figure(tmp_path: Path, fixture: tuple[dict[Any, A
     assert rows[1]["hit"] is True and rows[1]["first_ssg_rank"] == 2
     paths = make_figure(rows, tmp_path / "fig", note="A footnote.")
     assert all(p.exists() and p.stat().st_size > 0 for p in paths)
+
+
+def test_figure_drops_models_with_no_answered_call(fixture: tuple[dict[Any, Any], dict[Any, Any]]) -> None:
+    records, labels = fixture
+    rows = build_rows(MODELS, records, labels)
+    kept, dropped = drop_unanswered(rows)
+    assert dropped == ["Claude Opus 5.5"]
+    assert {r["model_key"] for r in kept} == {"gemini-4-argon"}
+    assert len(kept) == 9

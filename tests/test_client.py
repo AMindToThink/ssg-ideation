@@ -1,5 +1,6 @@
 import copy
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -7,20 +8,25 @@ import httpx
 import pytest
 
 from ssg_ideation import client as client_mod
+from ssg_ideation import run as run_mod
 from ssg_ideation.client import (
     CallError,
     build_request,
     call,
     classify,
+    followup_messages,
+    load_api_key,
     make_http_client,
-    turn2_messages,
 )
 from ssg_ideation.config import (
+    API_KEY_ENV,
     JUDGE_MODEL,
     POST_DRAFT,
     TARGET_MODELS,
     TURN1_PROMPT,
     TURN2_PROMPT,
+    TURN3_PROMPT,
+    TURN_PROMPTS,
     model_by_key,
 )
 from ssg_ideation.run import validate_model
@@ -150,6 +156,20 @@ def test_efforts_and_providers_per_model() -> None:
     assert (JUDGE_MODEL.model_id, JUDGE_MODEL.provider) == ("deepseek/deepseek-v4.1-flash-1017", "together")
 
 
+def test_only_astra_uses_the_personal_key() -> None:
+    keys = {m.key: m.api_key_env for m in (*TARGET_MODELS, JUDGE_MODEL)}
+    assert keys.pop("gpt-6-astra") == "OPENROUTER_API_KEY_PERSONAL"
+    assert set(keys.values()) == {API_KEY_ENV}
+
+
+def test_load_api_key_reads_the_named_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SSG_TEST_KEY_VAR", FAKE_KEY)
+    assert load_api_key("SSG_TEST_KEY_VAR") == FAKE_KEY
+    monkeypatch.setattr(client_mod, "REPO_ROOT", Path("/nonexistent"))
+    with pytest.raises(RuntimeError, match="SSG_TEST_KEY_VAR_MISSING"):
+        load_api_key("SSG_TEST_KEY_VAR_MISSING")
+
+
 def test_system_message_rejected() -> None:
     with pytest.raises(ValueError):
         build_request(GEMINI, [{"role": "system", "content": "x"}, {"role": "user", "content": "hi"}])
@@ -166,28 +186,50 @@ def test_prompts_are_verbatim_from_post() -> None:
     text = POST_DRAFT.read_text()
     assert TURN1_PROMPT in text
     assert TURN2_PROMPT in text
+    # Turn 3 is Matthew's addition, not from the post.
+    assert TURN3_PROMPT == (
+        "Please select and list the top 3 concerns you see as most interesting and important."
+    )
+    assert TURN_PROMPTS == {1: TURN1_PROMPT, 2: TURN2_PROMPT, 3: TURN3_PROMPT}
 
 
-# --- turn 2 assembly ---------------------------------------------------------
+# --- follow-up assembly ------------------------------------------------------
 
 
-def test_turn2_echoes_assistant_message_verbatim() -> None:
-    msg = completion_body()["choices"][0]["message"]
-    original = copy.deepcopy(msg)
-    messages = turn2_messages(TURN1_PROMPT, msg, TURN2_PROMPT)
+def stored_record(messages: list[dict[str, Any]], content: str) -> dict[str, Any]:
+    return {"request": {"body": build_request(GEMINI, messages)},
+            "response": {"body": completion_body(content=content)}}
+
+
+def test_followup_echoes_assistant_message_verbatim() -> None:
+    turn1 = stored_record([{"role": "user", "content": TURN1_PROMPT}], "first answer")
+    original = copy.deepcopy(turn1)
+    messages = followup_messages(turn1, TURN2_PROMPT)
+    msg = original["response"]["body"]["choices"][0]["message"]
     assert messages == [
         {"role": "user", "content": TURN1_PROMPT},
-        original,
+        msg,
         {"role": "user", "content": TURN2_PROMPT},
     ]
-    assert messages[1]["reasoning_details"] == original["reasoning_details"]
-    assert msg == original  # not mutated
+    assert messages[1]["reasoning_details"] == msg["reasoning_details"]
+    assert turn1 == original  # not mutated
 
 
-def test_turn2_requires_reasoning_details() -> None:
-    msg = {"role": "assistant", "content": "x"}
+def test_turn3_extends_the_exact_turn2_request() -> None:
+    turn1 = stored_record([{"role": "user", "content": TURN1_PROMPT}], "first answer")
+    turn2 = stored_record(followup_messages(turn1, TURN2_PROMPT), "second answer")
+    messages = followup_messages(turn2, TURN3_PROMPT)
+    assert messages[:3] == turn2["request"]["body"]["messages"]
+    assert messages[3] == turn2["response"]["body"]["choices"][0]["message"]
+    assert messages[4] == {"role": "user", "content": TURN3_PROMPT}
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant", "user"]
+
+
+def test_followup_requires_reasoning_details() -> None:
+    rec = stored_record([{"role": "user", "content": TURN1_PROMPT}], "x")
+    del rec["response"]["body"]["choices"][0]["message"]["reasoning_details"]
     with pytest.raises(ValueError):
-        turn2_messages(TURN1_PROMPT, msg, TURN2_PROMPT)
+        followup_messages(rec, TURN2_PROMPT)
 
 
 # --- classification ----------------------------------------------------------
@@ -360,3 +402,42 @@ def test_validate_model_rejects_missing_param_and_model() -> None:
         validate_model(GEMINI, models, endpoints, {"response_format"})
     with pytest.raises(RuntimeError, match="not listed"):
         validate_model(GEMINI, {}, endpoints, set())
+
+
+# --- conversations -----------------------------------------------------------
+
+
+def test_no_turn_is_sent_after_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(run_mod, "RAW_DIR", tmp_path)
+    (tmp_path / GEMINI.key).mkdir()
+    (tmp_path / GEMINI.key / "gen1_turn1.json").write_text(json.dumps({"outcome": "refused"}))
+    assert run_mod.refused_turn(GEMINI, 1, 2) == 1
+    assert run_mod.refused_turn(GEMINI, 1, 3) == 1
+    assert run_mod.refused_turn(GEMINI, 2, 3) is None
+    api = FakeAPI()
+    with api.client() as c:
+        for turns in ([2, 3], [3]):
+            run_mod.run_conversation(c, FAKE_KEY, GEMINI, 1, turns, "Google AI Studio", threading.Event())
+    assert api.requests == []
+
+
+def test_turn3_request_threads_the_stored_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(run_mod, "RAW_DIR", tmp_path)
+    api = FakeAPI()
+    with api.client() as c:
+        run_mod.run_conversation(c, FAKE_KEY, GEMINI, 1, [1, 2, 3], "Google AI Studio", threading.Event())
+    posts = [json.loads(r.content) for r in api.requests if r.url.path.endswith("/chat/completions")]
+    assert [len(p["messages"]) for p in posts] == [1, 3, 5]
+    assert posts[2]["messages"][:3] == posts[1]["messages"]
+    assert posts[2]["messages"][3] == completion_body()["choices"][0]["message"]
+    assert posts[2]["messages"][4] == {"role": "user", "content": TURN3_PROMPT}
+    rec = json.loads((tmp_path / GEMINI.key / "gen1_turn3.json").read_text())
+    assert rec["turn"] == 3 and rec["api_key_env"] == API_KEY_ENV
+    assert FAKE_KEY not in json.dumps(rec)
+    # Resuming makes no new completion request.
+    n = len(api.requests)
+    with api.client() as c:
+        run_mod.run_conversation(c, FAKE_KEY, GEMINI, 1, [1, 2, 3], "Google AI Studio", threading.Event())
+    assert len(api.requests) == n

@@ -45,10 +45,10 @@ class CallError(RuntimeError):
         self.record_path = record_path
 
 
-def load_api_key() -> str:
-    key = os.environ.get(API_KEY_ENV) or dotenv_values(REPO_ROOT / ".env").get(API_KEY_ENV)
+def load_api_key(env_name: str = API_KEY_ENV) -> str:
+    key = os.environ.get(env_name) or dotenv_values(REPO_ROOT / ".env").get(env_name)
     if not key:
-        raise RuntimeError(f"{API_KEY_ENV} is not set in the environment or {REPO_ROOT / '.env'}")
+        raise RuntimeError(f"{env_name} is not set in the environment or {REPO_ROOT / '.env'}")
     return key
 
 
@@ -136,16 +136,16 @@ def assistant_message(record: dict[str, Any]) -> dict[str, Any]:
     return record["response"]["body"]["choices"][0]["message"]
 
 
-def turn2_messages(
-    turn1_prompt: str, turn1_assistant: dict[str, Any], turn2_prompt: str
-) -> list[dict[str, Any]]:
-    """Turn-1 exchange (assistant message echoed verbatim, incl. reasoning_details) + turn 2."""
-    if "reasoning_details" not in turn1_assistant:
-        raise ValueError("turn-1 assistant message has no reasoning_details to echo")
+def followup_messages(prev_record: dict[str, Any], prompt: str) -> list[dict[str, Any]]:
+    """The previous call's messages, its assistant message echoed verbatim (incl.
+    reasoning_details), then the next user prompt."""
+    prev_assistant = assistant_message(prev_record)
+    if "reasoning_details" not in prev_assistant:
+        raise ValueError("previous assistant message has no reasoning_details to echo")
     return [
-        {"role": "user", "content": turn1_prompt},
-        turn1_assistant,
-        {"role": "user", "content": turn2_prompt},
+        *prev_record["request"]["body"]["messages"],
+        prev_assistant,
+        {"role": "user", "content": prompt},
     ]
 
 
