@@ -45,10 +45,13 @@ TARGET_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("gemini-4-argon", "google/gemini-4-argon", "google-ai-studio", "high", 65536),
 )
 
-# The judge only reads model outputs. Effort "high" is the endpoint's default;
-# we send it explicitly so it is recorded in every request.
+# The judge only reads model outputs. Effort "high" is the model's default; we
+# send it explicitly so it is recorded in every request. DeepSeek's first-party
+# endpoint is excluded by data_collection="deny" (it may train on paid traffic),
+# so the judge is pinned to Together, a single non-tiered endpoint whose
+# quantization OpenRouter lists as "unknown" (Matthew's choice, 2026-10-29).
 JUDGE_MODEL: ModelSpec = ModelSpec(
-    "deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash-1017", "deepseek", "high", 32000
+    "deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash-1017", "together", "high", 32000
 )
 
 N_GENERATIONS: int = 3

@@ -147,7 +147,7 @@ def test_efforts_and_providers_per_model() -> None:
         "claude-fable-5.1": ("anthropic/claude-fable-5.1", "anthropic", "max", 128000),
         "gemini-4-argon": ("google/gemini-4-argon", "google-ai-studio", "high", 65536),
     }
-    assert (JUDGE_MODEL.model_id, JUDGE_MODEL.provider) == ("deepseek/deepseek-v4.1-flash-1017", "deepseek")
+    assert (JUDGE_MODEL.model_id, JUDGE_MODEL.provider) == ("deepseek/deepseek-v4.1-flash-1017", "together")
 
 
 def test_system_message_rejected() -> None:
