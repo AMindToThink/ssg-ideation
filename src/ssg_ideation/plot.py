@@ -38,8 +38,8 @@ AXIS = "#c3c2b7"
 
 DEFAULT_NOTE = (
     "Hits are the DeepSeek V4.1 Flash judge's majority labels (3 samples per idea); * = the "
-    "samples split on that idea. Turn-3 ranks are positions in the model's top-3 list. A hand "
-    "audit (results/manual_spotcheck.md) disagrees with some judge hits."
+    "samples split on that idea. Turn-3 ranks are positions in the model's top-3 list. A read by "
+    "Claude Code Opus 5.5 (results/claude_code_opus_spotcheck.md) disagrees with some judge hits."
 )
 
 
