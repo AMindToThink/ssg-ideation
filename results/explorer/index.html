@@ -34,6 +34,10 @@
   .sx-sw-ring { border-radius: 50%; border: 1.5px solid var(--color-fg-muted); }
   .sx-sw-dash { border-radius: 50%; border: 1.5px dashed var(--cds-chart-reference); }
   .sx-tip { position: absolute; z-index: 2; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); line-height: 1.45; width: max-content; max-width: min(24rem, 90%); display: grid; gap: 4px; }
+  .sx-tip-live { pointer-events: auto; }
+  .sx-tip-btn { justify-self: start; font: inherit; font-size: var(--cds-font-size-caption); padding: 2px var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: 999px; background: transparent; color: var(--color-fg); cursor: pointer; }
+  .sx-tip-btn:hover { border-color: var(--color-fg); }
+  .sx-tip-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
   .sx-tip-k { color: var(--cds-text-secondary); }
   .sx-tip-t { font-weight: var(--cds-font-weight-medium); }
   .sx-tip-x { color: var(--color-fg); }
@@ -287,6 +291,12 @@
     tip.style.top = `${top}px`;
   }
 
+  // Select a response and bring its full idea list into view.
+  function openDetail(key) {
+    dash.setParams({sel: key});
+    document.querySelectorAll('#detail').forEach((d) => d.scrollIntoView({behavior: 'smooth', block: 'start'}));
+  }
+
   function hideTip(tip) {
     tip.hidden = true;
   }
@@ -407,9 +417,16 @@
     g.selectAll('circle.sx-sel').data(pts.filter((r) => r.key === sel)).join('circle').attr('class', 'sx-sel')
       .attr('cx', cx).attr('cy', cy).attr('r', 13).style('fill', 'none')
       .style('stroke', 'var(--color-fg)').style('stroke-width', 2);
-    const tip = node('div', 'sx-tip');
+    const tip = node('div', 'sx-tip sx-tip-live');
     tip.hidden = true;
     el.append(tip);
+    // Hide after a short delay so the pointer can move from the dot onto the tooltip.
+    let hideTimer = null;
+    const keep = () => clearTimeout(hideTimer);
+    const later = () => { clearTimeout(hideTimer); hideTimer = setTimeout(() => hideTip(tip), 300); };
+    tip.addEventListener('pointerenter', keep);
+    tip.addEventListener('pointerleave', later);
+    tip.addEventListener('focusout', (event) => { if (!tip.contains(event.relatedTarget)) later(); });
     const content = (r) => {
       const list = I.map.get(r.key) || [];
       const rank = rankOf(r, m);
@@ -426,7 +443,10 @@
       const judgeIdea = r.judge_rank == null ? null : list.find((i) => i.index === r.judge_rank);
       out.push(node('div', 'sx-tip-m', `Judge: ${hitWord(r, 'judge')}${judgeIdea ? ` (votes ${votesText(judgeIdea.votes)})` : ''}`));
       out.push(node('div', 'sx-tip-m', `Claude Code Opus 5.5: ${readerText(r)}`));
-      out.push(node('div', 'sx-tip-m', 'Click to read every idea in this response'));
+      const more = node('button', 'sx-tip-btn', 'Read every idea in this response');
+      more.type = 'button';
+      more.addEventListener('click', () => openDetail(r.key));
+      out.push(more);
       return out;
     };
     svg.append('g').selectAll('circle').data(pts).join('circle').attr('class', 'sx-hit')
@@ -434,15 +454,16 @@
       .attr('tabindex', 0).attr('role', 'button')
       .attr('aria-label', (r) => `${r.model}, conversation ${r.generation}, ${TURN_NAME[r.turn]}: ${hitWord(r, m)}`)
       .on('pointerenter focus', (event, r) => {
+        keep();
         tip.replaceChildren(...content(r));
         placeTip(el, tip, event.currentTarget);
       })
-      .on('pointerleave blur', () => hideTip(tip))
-      .on('click', (event, r) => dash.setParams({sel: r.key}))
+      .on('pointerleave blur', later)
+      .on('click', (event, r) => openDetail(r.key))
       .on('keydown', (event, r) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          dash.setParams({sel: r.key});
+          openDetail(r.key);
         }
       });
   });
