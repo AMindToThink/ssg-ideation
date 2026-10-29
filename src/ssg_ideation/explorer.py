@@ -2,9 +2,9 @@
 
 Writes results/explorer/responses.json (one row per model, generation and turn)
 and results/explorer/ideas.json (one row per idea in the judge's segmentation,
-with the idea's text cut from the response). The reader's labels come from
-results/reader_labels.csv, which transcribes results/manual_spotcheck.md onto
-the judge's idea numbering.
+with the idea's text cut from the response). The reader's labels (the Claude Code
+Opus 5.5 read) come from results/reader_labels.csv, which transcribes
+results/claude_code_opus_spotcheck.md onto the judge's idea numbering.
 
 Usage:
     uv run python -m ssg_ideation.explorer
