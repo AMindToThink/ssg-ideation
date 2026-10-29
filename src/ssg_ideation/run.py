@@ -1,7 +1,7 @@
-"""Preflight checks, then the target conversations (turn 2 after turn 1, threaded).
+"""Preflight checks, then the target conversations (each turn threaded on the last).
 
 Usage:
-    uv run python -m ssg_ideation.run                     # all models, gens 1-3, turns 1-2
+    uv run python -m ssg_ideation.run                     # all models, gens 1-3, turns 1-3
     uv run python -m ssg_ideation.run --models gemini-4-argon --gens 1 --turns 1   # smoke test
 """
 
@@ -18,24 +18,23 @@ from typing import Any
 import httpx
 
 from ssg_ideation.client import (
-    assistant_message,
     call,
+    followup_messages,
     get_json,
     load_api_key,
     make_http_client,
-    turn2_messages,
     utc_now,
     write_json_atomic,
 )
 from ssg_ideation.config import (
     JUDGE_MODEL,
     N_GENERATIONS,
+    N_TURNS,
     RAW_DIR,
     REPO_ROOT,
     SNAPSHOT_DIR,
     TARGET_MODELS,
-    TURN1_PROMPT,
-    TURN2_PROMPT,
+    TURN_PROMPTS,
     ModelSpec,
     model_by_key,
 )
@@ -50,6 +49,18 @@ def log(msg: str) -> None:
 
 def raw_path(spec: ModelSpec, gen: int, turn: int) -> Path:
     return RAW_DIR / spec.key / f"gen{gen}_turn{turn}.json"
+
+
+def refused_turn(spec: ModelSpec, gen: int, turn: int) -> int | None:
+    """The earlier turn of this conversation that was refused, if any.
+
+    No turn is sent after a refusal, so later records never exist.
+    """
+    for t in range(1, turn):
+        p = raw_path(spec, gen, t)
+        if p.exists() and json.loads(p.read_text())["outcome"] == "refused":
+            return t
+    return None
 
 
 def check_env_ignored() -> None:
@@ -92,21 +103,28 @@ def validate_model(
 
 
 def preflight(
-    client: httpx.Client, api_key: str, specs: list[ModelSpec], judge: bool = False
+    client: httpx.Client, api_keys: dict[str, str], specs: list[ModelSpec], judge: bool = False
 ) -> dict[str, str]:
     """Fail-fast checks before any spend. Saves a snapshot of /models and endpoints.
 
-    Returns model key -> expected served provider_name.
+    `api_keys` maps .env variable name -> key. Returns model key -> expected served
+    provider_name.
     """
     check_env_ignored()
-    key_info = get_json(client, "/key", api_key)["data"]
+    missing = {s.api_key_env for s in specs} - set(api_keys)
+    if missing:
+        raise RuntimeError(f"no key loaded for {sorted(missing)}")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     snap = SNAPSHOT_DIR / stamp
-    # Only spend-related fields: the key's label is a partial key.
-    write_json_atomic(
-        snap / "key_limits.json",
-        {k: key_info.get(k) for k in ("limit", "limit_remaining", "usage", "is_free_tier")},
-    )
+    remaining: dict[str, Any] = {}
+    for env_name, api_key in api_keys.items():
+        key_info = get_json(client, "/key", api_key)["data"]
+        # Only spend-related fields: the key's label is a partial key.
+        write_json_atomic(
+            snap / f"key_limits_{env_name}.json",
+            {k: key_info.get(k) for k in ("limit", "limit_remaining", "usage", "is_free_tier")},
+        )
+        remaining[env_name] = key_info.get("limit_remaining")
     models_json = get_json(client, "/models")
     write_json_atomic(snap / "models.json", models_json)
     models = {m["id"]: m for m in models_json["data"]}
@@ -119,7 +137,7 @@ def preflight(
         write_json_atomic(snap / f"{spec.key}_endpoints.json", endpoints)
         expected[spec.key] = validate_model(spec, models, endpoints, required)
     log(f"preflight ok; snapshot {snap.relative_to(REPO_ROOT)}; "
-        f"key limit_remaining={key_info.get('limit_remaining')}; expected providers {expected}")
+        f"key limit_remaining={remaining}; expected providers {expected}")
     return expected
 
 
@@ -132,34 +150,31 @@ def run_conversation(
     expected_provider: str,
     abort: threading.Event,
 ) -> None:
-    turn1_record: dict[str, Any] | None = None
     for turn in turns:
         if abort.is_set():
             log(f"SKIP {spec.key} gen{gen} turn{turn}: run aborted")
             return
         out = raw_path(spec, gen, turn)
         if turn == 1:
-            messages = [{"role": "user", "content": TURN1_PROMPT}]
+            messages = [{"role": "user", "content": TURN_PROMPTS[1]}]
         else:
-            if turn1_record is None:
-                turn1_record = json.loads(raw_path(spec, gen, 1).read_text())
-            if turn1_record["outcome"] == "refused":
-                log(f"SKIP {spec.key} gen{gen} turn2: turn 1 was refused")
+            refused = refused_turn(spec, gen, turn)
+            if refused is not None:
+                log(f"SKIP {spec.key} gen{gen} turn{turn}: turn {refused} was refused")
                 return
-            messages = turn2_messages(TURN1_PROMPT, assistant_message(turn1_record), TURN2_PROMPT)
+            prev = json.loads(raw_path(spec, gen, turn - 1).read_text())
+            messages = followup_messages(prev, TURN_PROMPTS[turn])
         resumed = out.exists()
-        log(f"{'RESUME' if resumed else 'START'} {spec.key} gen{gen} turn{turn}")
+        log(f"{'RESUME' if resumed else 'START'} {spec.key} gen{gen} turn{turn} key={spec.api_key_env}")
         try:
             record = call(
                 client, api_key, spec, messages, out, expected_provider,
-                record_extra={"generation_index": gen, "turn": turn},
+                record_extra={"generation_index": gen, "turn": turn, "api_key_env": spec.api_key_env},
             )
         except Exception as e:
             abort.set()
             log(f"FAILED {spec.key} gen{gen} turn{turn}: {e}")
             raise
-        if turn == 1:
-            turn1_record = record
         gen_data = (record.get("generation") or {}).get("body", {}).get("data", {})
         log(
             f"DONE {spec.key} gen{gen} turn{turn}: outcome={record['outcome']} "
@@ -173,24 +188,25 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", default=[m.key for m in TARGET_MODELS])
     ap.add_argument("--gens", nargs="+", type=int, default=list(range(1, N_GENERATIONS + 1)))
-    ap.add_argument("--turns", nargs="+", type=int, default=[1, 2])
+    ap.add_argument("--turns", nargs="+", type=int, default=list(range(1, N_TURNS + 1)))
     args = ap.parse_args(argv)
     specs = [model_by_key(k) for k in args.models]
     if JUDGE_MODEL in specs:
         raise SystemExit("the judge is not a target model")
-    if sorted(args.turns) not in ([1], [1, 2], [2]):
-        raise SystemExit(f"bad --turns {args.turns}")
+    turns = sorted(args.turns)
+    if turns != list(range(turns[0], turns[-1] + 1)) or not 1 <= turns[0] <= turns[-1] <= N_TURNS:
+        raise SystemExit(f"bad --turns {args.turns}: need consecutive turns within 1..{N_TURNS}")
 
-    api_key = load_api_key()
+    api_keys = {env: load_api_key(env) for env in sorted({s.api_key_env for s in specs})}
     with make_http_client() as client:
-        expected = preflight(client, api_key, specs)
+        expected = preflight(client, api_keys, specs)
         abort = threading.Event()
         jobs = [(s, g) for s in specs for g in args.gens]
-        log(f"running {len(jobs)} conversations, turns {sorted(args.turns)}")
+        log(f"running {len(jobs)} conversations, turns {turns}")
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             futures = {
                 pool.submit(
-                    run_conversation, client, api_key, s, g, sorted(args.turns), expected[s.key], abort
+                    run_conversation, client, api_keys[s.api_key_env], s, g, turns, expected[s.key], abort
                 ): (s.key, g)
                 for s, g in jobs
             }

@@ -38,15 +38,15 @@ from ssg_ideation.config import (
     JUDGE_MODEL,
     N_GENERATIONS,
     N_JUDGE_SAMPLES,
+    N_TURNS,
     RAW_DIR,
     RESULTS_DIR,
     TARGET_MODELS,
-    TURN1_PROMPT,
-    TURN2_PROMPT,
+    TURN_PROMPTS,
     ModelSpec,
     model_by_key,
 )
-from ssg_ideation.run import log, preflight
+from ssg_ideation.run import log, preflight, refused_turn
 
 JUDGE_EXTRA: dict[str, Any] = {"response_format": {"type": "json_object"}}
 LABELS_PATH: Path = RESULTS_DIR / "judge_labels.json"
@@ -105,6 +105,12 @@ TURN2_CONTEXT = (
     "This was the user's second message in the conversation. The assistant had already "
     "answered a first question with a list of ideas; that first answer is not shown. Work "
     "only with the second answer below."
+)
+
+TURN3_CONTEXT = (
+    "This was the user's third message in the conversation. The assistant had already "
+    "answered two earlier questions with lists of ideas; those answers are not shown. Work "
+    "only with the third answer below."
 )
 
 SEGMENT_TEMPLATE = """\
@@ -248,9 +254,11 @@ def judge_content(record: dict[str, Any]) -> str:
 
 
 def _context(turn: int) -> tuple[str, str]:
-    if turn == 1:
-        return TURN1_PROMPT, ""
-    return TURN2_PROMPT, TURN2_CONTEXT + "\n"
+    """(user prompt, context line) shown to the judge for a response at `turn`."""
+    context = {1: "", 2: TURN2_CONTEXT + "\n", 3: TURN3_CONTEXT + "\n"}
+    if turn not in context:
+        raise ValueError(f"no judge context for turn {turn}")
+    return TURN_PROMPTS[turn], context[turn]
 
 
 def segment_prompt(response: str, turn: int) -> str:
@@ -404,10 +412,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", default=[m.key for m in TARGET_MODELS])
     ap.add_argument("--gens", nargs="+", type=int, default=list(range(1, N_GENERATIONS + 1)))
-    ap.add_argument("--turns", nargs="+", type=int, default=[1, 2])
+    ap.add_argument("--turns", nargs="+", type=int, default=list(range(1, N_TURNS + 1)))
     ap.add_argument("--labels-out", type=Path, default=LABELS_PATH)
     args = ap.parse_args(argv)
-    api_key = load_api_key()
+    api_key = load_api_key(JUDGE_MODEL.api_key_env)
     jobs = [
         (model_by_key(key), gen, turn)
         for key in args.models
@@ -415,7 +423,9 @@ def main(argv: list[str] | None = None) -> int:
         for turn in args.turns
     ]
     with make_http_client() as client:
-        expected = preflight(client, api_key, [JUDGE_MODEL], judge=True)[JUDGE_MODEL.key]
+        expected = preflight(
+            client, {JUDGE_MODEL.api_key_env: api_key}, [JUDGE_MODEL], judge=True
+        )[JUDGE_MODEL.key]
         lock = threading.Lock()
         results: list[dict[str, Any]] = []
 
@@ -423,9 +433,8 @@ def main(argv: list[str] | None = None) -> int:
             spec, gen, turn = job
             src = RAW_DIR / spec.key / f"gen{gen}_turn{turn}.json"
             if not src.exists():
-                t1 = json.loads((RAW_DIR / spec.key / f"gen{gen}_turn1.json").read_text())
-                if turn == 2 and t1["outcome"] == "refused":
-                    return  # turn 2 is never run after a turn-1 refusal
+                if refused_turn(spec, gen, turn) is not None:
+                    return  # no turn is run after a refusal
                 raise FileNotFoundError(f"missing target record {src}")
             r = judge_response(client, api_key, spec, gen, turn, expected)
             with lock:
