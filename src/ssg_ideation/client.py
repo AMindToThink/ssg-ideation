@@ -78,7 +78,7 @@ def build_request(
         "messages": messages,
         "provider": provider_block(spec),
         "reasoning": {"effort": spec.effort},
-        "max_tokens": spec.max_tokens,
+        spec.max_tokens_param: spec.max_tokens,
         "stream": False,
     }
     if spec.effort is None:  # models without reasoning, such as GPT-4

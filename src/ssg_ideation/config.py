@@ -27,6 +27,7 @@ class ModelSpec:
     max_tokens: int  # set explicitly so a `length` stop is ours to detect
     api_key_env: str = API_KEY_ENV  # .env variable holding the OpenRouter key for this model
     display: str = ""  # label for models outside the fixed table below
+    max_tokens_param: str = "max_tokens"  # Azure's GPT endpoints take max_completion_tokens
 
     @property
     def label(self) -> str:
@@ -156,10 +157,11 @@ TIMELINE_DIRECT: tuple[DirectModel, ...] = (
 # gpt-3.5-turbo-0613 has a 4,096-token context, so its output cap leaves room for turn 3's input.
 TIMELINE_OPENROUTER: tuple[ModelSpec, ...] = (
     ModelSpec("gpt-3.5-turbo-0613", "openai/gpt-3.5-turbo-0613", "azure", None, 1500,
-              ASTRA_API_KEY_ENV, "GPT-3.5 Turbo (0613)"),
-    ModelSpec("gpt-4", "openai/gpt-4", "azure", None, 4096, ASTRA_API_KEY_ENV, "GPT-4"),
+              ASTRA_API_KEY_ENV, "GPT-3.5 Turbo (0613)", "max_completion_tokens"),
+    ModelSpec("gpt-4", "openai/gpt-4", "azure", None, 4096, ASTRA_API_KEY_ENV, "GPT-4",
+              "max_completion_tokens"),
     ModelSpec("gpt-4o-2024-05-13", "openai/gpt-4o-2024-05-13", "azure", None, 4096,
-              ASTRA_API_KEY_ENV, "GPT-4o (2024-05-13)"),
+              ASTRA_API_KEY_ENV, "GPT-4o (2024-05-13)", "max_completion_tokens"),
 )
 
 _OPENAI = "OpenAI announcement"
