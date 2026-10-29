@@ -114,10 +114,22 @@ def render(result: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--labels", type=Path, default=OPUS_LABELS_PATH)
+    ap.add_argument("--labels", type=Path, nargs="+", default=[OPUS_LABELS_PATH],
+                    help="one or more label files; their responses must not overlap")
+    ap.add_argument("--models", nargs="+", default=None,
+                    help="compare only these models' responses (default: every reader-labeled response)")
     ap.add_argument("--judge-model", default=OPUS_JUDGE.model_id)
     args = ap.parse_args(argv)
-    result = compare(load_reader(), load_labels(args.labels, args.judge_model))
+    labels: dict[Key, dict[str, Any]] = {}
+    for path in args.labels:
+        more = load_labels(path, args.judge_model)
+        if set(more) & set(labels):
+            raise ValueError(f"{path} repeats responses already loaded")
+        labels |= more
+    reader = load_reader()
+    if args.models is not None:
+        reader = {k: v for k, v in reader.items() if k[0] in args.models}
+    result = compare(reader, labels)
     print(render(result))
     return 1 if result["failures"] else 0
 

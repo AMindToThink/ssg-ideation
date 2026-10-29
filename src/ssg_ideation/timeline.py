@@ -5,7 +5,8 @@ results/figures/ssg_timeline{,_judge}.{png,pdf}. The current-models outputs
 (summary.csv, report.md) are untouched.
 
 Usage:
-    uv run python -m ssg_ideation.judge --models <timeline keys> --labels-out results/timeline_judge_labels.json
+    uv run python -m ssg_ideation.opus_judge --models <timeline keys except gpt-6-astra> \
+        --labels-out results/timeline_opus_judge_labels.json
     uv run python -m ssg_ideation.timeline
 """
 
@@ -31,12 +32,14 @@ from ssg_ideation.analyze import (  # noqa: E402
     render_report,
     write_summary,
 )
+from ssg_ideation.opus_judge import OPUS_LABELS_PATH  # noqa: E402
 from ssg_ideation.config import FIGURES_DIR, RESULTS_DIR, TIMELINE, TIMELINE_UNAVAILABLE, model_by_key  # noqa: E402
 from ssg_ideation.plot import AXIS, GRID, INK, INK_2, MUTED, SERIES, SERIES_LABEL, SURFACE  # noqa: E402
 
 SUMMARY_PATH: Path = RESULTS_DIR / "timeline_summary.csv"
 REPORT_PATH: Path = RESULTS_DIR / "timeline_report.md"
-LABELS_PATH: Path = RESULTS_DIR / "timeline_judge_labels.json"
+# GPT-6 Astra's labels come from the current-models file (OPUS_LABELS_PATH).
+LABELS_PATH: Path = RESULTS_DIR / "timeline_opus_judge_labels.json"
 # The new timeline rows were not spot-checked by Matthew; GPT-6 Astra's were (current-models run).
 CLAUDE_NAME = "Claude Code Opus 5.5 labels"
 MEASURES: tuple[str, ...] = ("turn1", "turn2", "either", "turn3")
@@ -47,9 +50,19 @@ REPORT_INTRO = (
     "were written by Claude Opus 5.5 in Claude Code before any judge label was made "
     "(results/claude_code_opus_spotcheck.md); they take priority, and no person labeled every response "
     "(GPT-6 Astra's labels come from the current-models run, where Matthew spot-checked some "
-    "disagreements). The **judge** is DeepSeek V4.1 Flash, as in the current-models run. Ranks follow "
-    "the judge's numbering of ideas."
+    "disagreements; the other timeline labels were not spot-checked). The **judge** is Claude Opus 5.5 "
+    "at reasoning effort high (src/ssg_ideation/opus_judge.py), the same judge as the current-models run. "
+    "Ideas were split by DeepSeek V4.1 Flash; ranks follow its numbering."
 )
+
+
+def load_timeline_labels() -> dict[tuple[str, int, int], dict[str, Any]]:
+    """Timeline labels plus GPT-6 Astra's from the current-models run; a key in both raises."""
+    timeline, current = load_labels(LABELS_PATH), load_labels(OPUS_LABELS_PATH)
+    astra = {k: v for k, v in current.items() if k[0] == "gpt-6-astra"}
+    if set(astra) & set(timeline):
+        raise ValueError("GPT-6 Astra labels in both label files")
+    return timeline | astra
 
 
 def keys() -> list[str]:
@@ -134,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.parse_args(argv)
     ks = keys()
     records = load_records(ks)
-    labels = load_labels(LABELS_PATH)
+    labels = load_timeline_labels()
     rows = build_rows(ks, records, labels, load_reader())
     for r, p in ((r, next(p for p in TIMELINE if p.key == r["model_key"])) for r in rows):
         r["model"] = f"{model_by_key(p.key).label} ({p.released})"
@@ -146,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = make_figure(claude, NOTE.format(labels=f"Hits: {CLAUDE_NAME}, clear statements only (written before "
                                             "the judge's labels; GPT-6 Astra's were spot-checked)."),
                         FIGURES_DIR, "ssg_timeline")
-    paths += make_figure(judge, NOTE.format(labels="Hits: the DeepSeek V4.1 Flash judge's majority labels."),
+    paths += make_figure(judge, NOTE.format(labels="Hits: the Claude Opus 5.5 judge's clear labels (median of 3 samples)."),
                          FIGURES_DIR, "ssg_timeline_judge")
     for c, j in zip(claude, judge, strict=True):
         print(f"{c['label']:24s} {c['released']}  claude {[c[m] for m in MEASURES]}  judge {[j[m] for m in MEASURES]}")

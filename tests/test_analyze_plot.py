@@ -26,10 +26,14 @@ def record(outcome: str = "ok", content: str = "1. idea") -> dict[str, Any]:
 
 
 def label(hit: bool, rank: int | None = None, n: int = 5) -> dict[str, Any]:
+    """An Opus-judge label: idea `rank` is clear, every other idea is none."""
     ideas = [{"index": i, "title": f"idea {i}", "anchor": "a b c", "votes": [i == rank] * 3,
+              "labels": ["clear" if i == rank else "none"] * 3, "label": "clear" if i == rank else "none",
               "is_ssg": i == rank, "near_miss_votes": [False] * 3, "is_near_miss": False,
-              "unanimous": True, "rationales": ["r1", "r2", "r3"]} for i in range(1, n + 1)]
+              "is_borderline": False, "unanimous": True, "rationales": ["r1", "r2", "r3"]}
+             for i in range(1, n + 1)]
     return {"hit": hit, "first_ssg_rank": rank, "n_ideas": n, "ssg_ranks": [rank] if rank else [],
+            "hit_any": hit, "first_any_rank": rank, "borderline_ranks": [],
             "near_miss_ranks": [], "disagreements": [], "ssg_anywhere": hit,
             "ssg_anywhere_votes": [hit] * 3, "ssg_anywhere_quotes": ["q"] * 3 if hit else [None] * 3,
             "is_refusal": False, "ideas": ideas}
@@ -94,9 +98,9 @@ def test_report_contains_every_response(fixture: tuple[dict[Any, Any], dict[Any,
     assert report.count("### Generation") == 18
     assert "**Refused**" in report and "Not run: an earlier turn was refused." in report
     assert f"**Turn 3:** {TURN3_PROMPT}" in report
-    assert "| Gemini 4 Argon | Judge (DeepSeek V4.1 Flash) | 1/3 | 1/3 | 2/3 | 2/3 | 1 | 0 |" in report
+    assert "| Gemini 4 Argon | Judge (Claude Opus 5.5), clear | 1/3 | 1/3 | 2/3 | 2/3 | 1 | 0 |" in report
     assert "**Truncated**" in report
-    assert "| 2 | idea 2 | YYY | **YES** |" in report
+    assert "| 2 | idea 2 | CCC | **clear** |" in report
 
 
 def test_summary_roundtrip_and_figure(tmp_path: Path, fixture: tuple[dict[Any, Any], dict[Any, Any]]) -> None:
@@ -161,10 +165,10 @@ def test_claude_columns_counts_and_report_order(fixture: tuple[dict[Any, Any], d
     assert hit_counts(rows, "gemini-4-argon", "judge")["turn2"] == 1
     report = render_report(rows, records, labels, MODELS)
     claude_row = report.index("| Gemini 4 Argon | Claude Code Opus 5.5 (spot-checked), clear |")
-    judge_row = report.index("| Gemini 4 Argon | Judge (DeepSeek V4.1 Flash) |")
+    judge_row = report.index("| Gemini 4 Argon | Judge (Claude Opus 5.5), clear |")
     assert claude_row < judge_row
     section = report[report.index("### Generation 3, turn 1"):]
-    assert section.index("Claude Code Opus 5.5 (spot-checked):** clear statement, first at idea 5. Says it.") < section.index("**Judge:**")
+    assert section.index("Claude Code Opus 5.5 (spot-checked):** clear statement, first at idea 5. Says it.") < section.index("**Judge (Claude Opus 5.5):**")
     write_summary(rows, tmp_path / "s.csv")
     back = read_summary(tmp_path / "s.csv")
     fields = list(back[0])
