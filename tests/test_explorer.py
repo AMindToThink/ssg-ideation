@@ -54,3 +54,10 @@ def test_load_reader_checks_verdict_against_indices(tmp_path: Path) -> None:
             load_reader(write_reader(tmp_path / "b.csv", [ok | bad]))
     with pytest.raises(ValueError):
         load_reader(write_reader(tmp_path / "c.csv", [ok, ok]))
+
+
+def test_ideas_sharing_a_line_split_at_their_anchors() -> None:
+    response = "### 1. First idea\nBody.\n\n**Runners-up:** gradient freeze is crisp; feral processes need reach.\n"
+    texts = idea_texts(response, ["First idea Body", "gradient freeze is crisp", "feral processes need reach"])
+    assert texts == ["### 1. First idea\nBody.", "**Runners-up:** gradient freeze is crisp;",
+                     "feral processes need reach."]
