@@ -163,10 +163,20 @@ def _votes(v: list[bool]) -> str:
     return "".join("Y" if x else "n" for x in v)
 
 
+def visible_reasoning(msg: dict[str, Any]) -> str | None:
+    """The message's `reasoning` text, or else the reasoning summaries inside
+    `reasoning_details` (OpenAI models return only summaries)."""
+    if msg.get("reasoning"):
+        return msg["reasoning"]
+    summaries = [d["summary"] for d in msg.get("reasoning_details") or []
+                 if d.get("type") == "reasoning.summary"]
+    return "\n\n".join(summaries) or None
+
+
 def _response_section(rec: dict[str, Any], lab: dict[str, Any] | None) -> list[str]:
     msg = rec["response"]["body"]["choices"][0]["message"]
     out: list[str] = []
-    reasoning = msg.get("reasoning")
+    reasoning = visible_reasoning(msg)
     if reasoning:
         out += ["<details><summary>Visible reasoning returned by the API</summary>", "",
                 "```text", reasoning, "```", "", "</details>", ""]
