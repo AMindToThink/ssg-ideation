@@ -49,7 +49,8 @@ record whose stored request differs from the request built now raises instead of
 `src/ssg_ideation/config.py` is the single source of truth for this table and for the prompts.
 
 - **Prompts.** Turn 1 and turn 2 are copied verbatim from the post's Appendix; a test checks
-  that both strings occur in `reference/ssg_post_draft.txt`. Turn 3 is Matthew's addition
+  that both strings occur in `reference/ssg_post_draft.txt` (a git-ignored local copy
+  of the draft; the test skips where it is absent). Turn 3 is Matthew's addition
   (2026-10-29), not from the post: "Please select and list the top 3 concerns you see as most
   interesting and important." Each follow-up sends the previous call's messages exactly as they
   were sent, then the previous assistant message exactly as the API returned it (including
