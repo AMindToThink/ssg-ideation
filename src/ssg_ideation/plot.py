@@ -154,7 +154,37 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
               ncols=len(handles), bbox_to_anchor=(0.5, -0.08))
 
 
-def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None) -> list[Path]:
+CLAUDE_NOTE = (
+    "Hits are the Claude Code Opus 5.5 labels ({which}), written before the judge's labels were "
+    "opened and spot-checked on some disagreements with the judge; ranks follow the judge's numbering "
+    "of ideas (results/claude_code_opus_spotcheck.md, results/reader_labels.csv). Turn-3 ranks are "
+    "positions in the model's top-3 list."
+)
+
+
+def with_claude_labels(
+    rows: list[dict[str, Any]], reader: dict[tuple[str, int, int], dict[str, Any]], borderline: bool = False
+) -> list[dict[str, Any]]:
+    """Summary rows with hit and rank taken from the Claude Code Opus 5.5 labels.
+
+    Counts clear statements only, or clear and borderline ideas when `borderline`.
+    """
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        r = dict(r)
+        if r["status"] in ("ok", "truncated"):
+            rd = reader[(r["model_key"], r["generation"], r["turn"])]
+            rank = min(rd["clear"] + (rd["borderline"] if borderline else []), default=None)
+            r["hit"] = rank is not None
+            r["first_ssg_rank"] = rank
+            r["rank_label"] = f"#{rank}/{r['n_ideas']}" if rank else f"miss ({r['n_ideas']} ideas)"
+        out.append(r)
+    return out
+
+
+def make_figure(
+    rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None, name: str = "ssg_ideation"
+) -> list[Path]:
     rows, dropped = drop_unanswered(rows)
     if dropped:
         note = " ".join(filter(None, [note, f"Not shown: {', '.join(dropped)} (every conversation "
@@ -170,7 +200,7 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: s
     if lines:
         fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
     out_dir.mkdir(parents=True, exist_ok=True)
-    paths = [out_dir / "ssg_ideation.png", out_dir / "ssg_ideation.pdf"]
+    paths = [out_dir / f"{name}.png", out_dir / f"{name}.pdf"]
     for p in paths:
         fig.savefig(p, dpi=200, facecolor=SURFACE)
     plt.close(fig)
@@ -179,9 +209,17 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: s
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--note", default=DEFAULT_NOTE, help="footnote printed under the figure")
+    ap.add_argument("--note", default=DEFAULT_NOTE, help="footnote for the judge-labeled figure")
     args = ap.parse_args(argv)
-    for p in make_figure(read_summary(), note=args.note):
+    from ssg_ideation.explorer import load_reader  # explorer imports this module
+
+    rows, reader = read_summary(), load_reader()
+    paths = make_figure(rows, note=args.note)
+    paths += make_figure(with_claude_labels(rows, reader), note=CLAUDE_NOTE.format(which="clear statements only"),
+                         name="ssg_ideation_claude")
+    paths += make_figure(with_claude_labels(rows, reader, borderline=True),
+                         note=CLAUDE_NOTE.format(which="clear or borderline"), name="ssg_ideation_claude_borderline")
+    for p in paths:
         print(f"wrote {p}")
     return 0
 
