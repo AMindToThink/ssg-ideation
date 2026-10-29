@@ -21,6 +21,7 @@ from ssg_ideation.config import (
     TURN_PROMPTS,
     model_by_key,
 )
+from ssg_ideation.client import record_message, record_stats
 from ssg_ideation.judge import LABELS_PATH
 
 TURNS: range = range(1, N_TURNS + 1)
@@ -142,18 +143,11 @@ def build_rows(
                         continue
                     raise FileNotFoundError(f"missing target record for {k}")
                 status = rec["outcome"]
-                choice = (rec["response"]["body"].get("choices") or [{}])[0]
-                gen_data = ((rec.get("generation") or {}).get("body") or {}).get("data") or {}
                 row |= {
                     "status": status,
                     "refused": status == "refused",
                     "truncated": status == "truncated",
-                    "finish_reason": choice.get("finish_reason"),
-                    "native_finish_reason": choice.get("native_finish_reason"),
-                    "prompt_tokens": gen_data.get("native_tokens_prompt"),
-                    "completion_tokens": gen_data.get("native_tokens_completion"),
-                    "reasoning_tokens": gen_data.get("native_tokens_reasoning"),
-                    "cost_usd": gen_data.get("total_cost"),
+                    **record_stats(rec),
                     "latency_s": round(rec["latency_s"], 1),
                 }
                 if status == "refused":
@@ -261,7 +255,7 @@ def _rank_text(row: dict[str, Any], labels: str) -> str:
 
 
 def _response_section(rec: dict[str, Any], lab: dict[str, Any] | None, row: dict[str, Any]) -> list[str]:
-    msg = rec["response"]["body"]["choices"][0]["message"]
+    msg = record_message(rec)
     out: list[str] = []
     reasoning = visible_reasoning(msg)
     if reasoning:

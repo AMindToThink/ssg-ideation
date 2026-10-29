@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ssg_ideation.client import (
     assistant_message,
+    record_message,
     call,
     error_path,
     load_api_key,
@@ -247,7 +248,7 @@ def normalize(text: str) -> str:
 
 
 def judge_content(record: dict[str, Any]) -> str:
-    content = record["response"]["body"]["choices"][0]["message"]["content"]
+    content = record_message(record)["content"]
     if not isinstance(content, str) or not content.strip():
         raise ValueError("record has no response text")
     return content
