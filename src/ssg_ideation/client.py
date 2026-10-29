@@ -245,8 +245,12 @@ def call(
     response is saved but whose /generation metadata is missing gets only the
     metadata fetch, so a crash never re-spends tokens.
     """
+    body = build_request(spec, messages, extra)
     if out_path.exists():
         record = json.loads(out_path.read_text())
+        if record["request"]["body"] != body:
+            raise CallError("stored request differs from the one built now; move the record "
+                            "aside before re-requesting", out_path)
         if is_complete(record):
             return record
         if record.get("provider_check") == "failed":
@@ -255,7 +259,6 @@ def call(
             raise CallError(f"unexpected record state {record.get('outcome')!r}", out_path)
         return _finish(client, api_key, record, out_path, expected_provider_name, generation_meta_timeout_s)
 
-    body = build_request(spec, messages, extra)
     headers = request_headers(api_key)
     record: dict[str, Any] = {
         "model_key": spec.key,

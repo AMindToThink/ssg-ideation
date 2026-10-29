@@ -254,6 +254,16 @@ def test_complete_record_is_not_rerequested(tmp_path: Path) -> None:
     assert api2.requests == []
 
 
+def test_changed_request_is_not_silently_reused(tmp_path: Path) -> None:
+    out = tmp_path / "gen1_turn1.json"
+    do_call(FakeAPI(), out)
+    api2 = FakeAPI()
+    with api2.client() as c, pytest.raises(CallError, match="stored request differs"):
+        call(c, FAKE_KEY, GEMINI, [{"role": "user", "content": "a different prompt"}], out,
+             "Google AI Studio", generation_meta_timeout_s=5.0)
+    assert api2.requests == []
+
+
 def test_pending_record_only_fetches_generation(tmp_path: Path) -> None:
     out = tmp_path / "gen1_turn1.json"
     first = do_call(FakeAPI(), out)
