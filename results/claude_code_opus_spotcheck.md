@@ -5,6 +5,10 @@ after reading every judged response's text in
 `data/raw/` and **before** opening the full judge's labels (`results/judge_labels.json`). The
 two Gemini gen 1 rows are not blind: their judge labels were seen during the judge smoke test.
 
+**Spot-checked (2026-10-29).** Matthew read some of the responses where these labels and the
+judge disagree, and sided with these labels in the ones he read. He did not review every label.
+The explorer dashboard shows these labels (clear statements only) by default.
+
 Bar used: the judge prompt's bar in `src/ssg_ideation/judge.py`. An idea is SSG when one agent
 makes another learner's outcomes depend on that learner's behavior (help preferred behavior,
 hinder dispreferred behavior) **and** links this to what training reinforces in that learner.
