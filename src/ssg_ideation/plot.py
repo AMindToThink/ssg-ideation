@@ -36,6 +36,12 @@ MUTED = "#898781"
 GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 
+DEFAULT_NOTE = (
+    "Hits are the DeepSeek V4.1 Flash judge's majority labels (3 samples per idea); * = the "
+    "samples split on that idea. Turn-3 ranks are positions in the model's top-3 list. A hand "
+    "audit (results/manual_spotcheck.md) disagrees with some judge hits."
+)
+
 
 def read_summary(path: Path = SUMMARY_PATH) -> list[dict[str, Any]]:
     def parse(r: dict[str, str]) -> dict[str, Any]:
@@ -109,14 +115,16 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     bottom = max_rank + 2  # band below the ranks for misses and refusals
     for i, (key, _) in enumerate(models):
         for r in (r for r in rows if r["model_key"] == key):
-            dx = (r["turn"] - 2) * 0.3 + (r["generation"] - 2) * 0.09
+            dx = (r["turn"] - 2) * 0.32 + (r["generation"] - 2) * 0.1
             x = i + dx
             color = SERIES[f"turn{r['turn']}"]
             if r["hit"]:
                 ax.scatter(x, r["first_ssg_rank"], s=64, color=color, edgecolors=SURFACE,
                            linewidths=2, zorder=3)
-                ax.text(x, r["first_ssg_rank"] - 0.35, r["rank_label"], ha="center", va="bottom",
-                        fontsize=7, color=INK_2)
+                # Neighbouring generations alternate label above / below the dot.
+                below = r["generation"] == 2
+                ax.text(x, r["first_ssg_rank"] + (0.3 if below else -0.3), r["rank_label"],
+                        ha="center", va="top" if below else "bottom", fontsize=7, color=INK_2)
             elif r["status"] == "skipped_after_refusal":
                 continue
             elif r["status"] == "refused":
@@ -138,10 +146,12 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
                label="Turn 3 hit (rank within top 3)"),
         Line2D([], [], marker="o", linestyle="", markersize=8, markerfacecolor="none",
                markeredgecolor=MUTED, label="Miss"),
-        Line2D([], [], marker="x", linestyle="", markersize=8, color=MUTED, markeredgewidth=2,
-               label="Refused"),
     ]
-    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper right", labelcolor=INK_2, ncols=2)
+    if any(r["status"] == "refused" for r in rows):
+        handles.append(Line2D([], [], marker="x", linestyle="", markersize=8, color=MUTED,
+                              markeredgewidth=2, label="Refused"))
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper center", labelcolor=INK_2,
+              ncols=len(handles), bbox_to_anchor=(0.5, -0.08))
 
 
 def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None) -> list[Path]:
@@ -149,7 +159,8 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: s
     if dropped:
         note = " ".join(filter(None, [note, f"Not shown: {', '.join(dropped)} (every conversation "
                                             "was refused at turn 1; see report.md)."]))
-    fig, (a, b) = plt.subplots(1, 2, figsize=(14, 5.2), facecolor=SURFACE)
+    fig, (a, b) = plt.subplots(1, 2, figsize=(15, 5.8), facecolor=SURFACE,
+                               gridspec_kw={"width_ratios": [1, 1.35]})
     for ax in (a, b):
         _style(ax)
     panel_hit_rate(a, rows)
@@ -168,7 +179,7 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: s
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--note", help="footnote printed under the figure")
+    ap.add_argument("--note", default=DEFAULT_NOTE, help="footnote printed under the figure")
     args = ap.parse_args(argv)
     for p in make_figure(read_summary(), note=args.note):
         print(f"wrote {p}")
