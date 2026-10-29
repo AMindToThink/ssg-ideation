@@ -1,6 +1,7 @@
-# Manual spot-check of SSG labels
+# Claude Code Opus 5.5 spot-check of SSG labels
 
-Written by Claude (Opus 5.5) on 2026-10-29, after reading every judged response's text in
+Written by Claude Opus 5.5 in Claude Code on 2026-10-29 (no person labeled these responses),
+after reading every judged response's text in
 `data/raw/` and **before** opening the full judge's labels (`results/judge_labels.json`). The
 two Gemini gen 1 rows are not blind: their judge labels were seen during the judge smoke test.
 
