@@ -58,6 +58,9 @@ def test_build_rows_and_hit_counts(fixture: tuple[dict[Any, Any], dict[Any, Any]
     assert by[("gemini-4-argon", 1, 2)]["rank_label"] == "#2/6"
     assert by[("gemini-4-argon", 2, 1)]["rank_label"] == "#4/12"
     assert by[("gemini-4-argon", 1, 1)]["rank_label"] == "miss (5 ideas)"
+    labels[("gemini-4-argon", 2, 1)]["disagreements"] = [4]
+    split_rows = build_rows(MODELS, records, labels)
+    assert [r["rank_label"] for r in split_rows if (r["generation"], r["turn"]) == (2, 1)][0] == "#4/12*"
     assert by[("gemini-4-argon", 3, 1)]["truncated"] is True
     assert by[("claude-opus-5.5", 1, 1)]["status"] == "refused"
     assert by[("claude-opus-5.5", 1, 2)]["status"] == "skipped_after_refusal"
