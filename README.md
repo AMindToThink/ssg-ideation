@@ -10,6 +10,9 @@ while planning.
 Results: `results/report.md` (every response in full, with judge labels inline),
 `results/summary.csv`, `results/figures/ssg_ideation.{png,pdf}`, and
 `results/manual_spotcheck.md` (labels written by hand before the judge's labels were read).
+`results/reader_labels.csv` puts those hand labels on the judge's idea numbering, and
+`uv run python -m ssg_ideation.explorer` writes `results/explorer/{responses,ideas}.json`, the
+data behind the interactive explorer (a private claude.ai dashboard).
 
 ## Running it
 
