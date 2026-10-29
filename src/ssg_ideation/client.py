@@ -212,6 +212,8 @@ def check_served_provider(
         problems.append(f"response.service_tier={body.get('service_tier')!r}")
     if data.get("service_tier") in FORBIDDEN_SERVICE_TIERS:
         problems.append(f"generation.service_tier={data.get('service_tier')!r}")
+    if data.get("response_cache_source_id") is not None:
+        problems.append(f"served from response cache {data['response_cache_source_id']!r}")
     for pr in data.get("provider_responses") or []:
         if pr.get("provider_name") != expected_provider_name:
             problems.append(f"provider_responses has {pr.get('provider_name')!r}")
