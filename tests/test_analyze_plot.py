@@ -5,7 +5,7 @@ import pytest
 
 from ssg_ideation.analyze import build_rows, hit_counts, render_report, visible_reasoning, write_summary
 from ssg_ideation.config import TURN3_PROMPT
-from ssg_ideation.plot import drop_unanswered, make_figure, read_summary
+from ssg_ideation.plot import drop_unanswered, make_figure, read_summary, with_claude_labels
 
 MODELS = ["gemini-4-argon", "claude-opus-5.5"]
 
@@ -124,3 +124,21 @@ def test_visible_reasoning_falls_back_to_summaries() -> None:
                {"type": "reasoning.summary", "summary": "second"}]
     assert visible_reasoning({"reasoning": "", "reasoning_details": details}) == "first\n\nsecond"
     assert visible_reasoning({"reasoning": None, "reasoning_details": details[:1]}) is None
+
+
+def test_claude_labels_replace_judge_hits(fixture: tuple[dict[Any, Any], dict[Any, Any]], tmp_path: Path) -> None:
+    records, labels = fixture
+    rows = build_rows(MODELS, records, labels)
+    none: dict[str, list[int]] = {"clear": [], "borderline": []}
+    reader = {(r["model_key"], r["generation"], r["turn"]): dict(none) for r in rows}
+    reader[("gemini-4-argon", 1, 2)] = {"clear": [], "borderline": [3]}
+    reader[("gemini-4-argon", 3, 1)] = {"clear": [5], "borderline": [2]}
+    strict = {(r["generation"], r["turn"]): r for r in with_claude_labels(rows, reader) if r["model_key"] == "gemini-4-argon"}
+    assert strict[(1, 2)]["hit"] is False and strict[(2, 1)]["hit"] is False
+    assert strict[(3, 1)]["first_ssg_rank"] == 5 and strict[(3, 1)]["rank_label"] == "#5/5"
+    loose = {(r["generation"], r["turn"]): r for r in with_claude_labels(rows, reader, borderline=True)
+             if r["model_key"] == "gemini-4-argon"}
+    assert loose[(1, 2)]["first_ssg_rank"] == 3 and loose[(3, 1)]["first_ssg_rank"] == 2
+    assert hit_counts(with_claude_labels(rows, reader), "gemini-4-argon")["turn1"] == 1
+    paths = make_figure(with_claude_labels(rows, reader), tmp_path, name="claude")
+    assert [p.name for p in paths] == ["claude.png", "claude.pdf"]
