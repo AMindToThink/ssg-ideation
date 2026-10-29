@@ -51,19 +51,24 @@ def normalized_with_offsets(text: str) -> tuple[str, list[int]]:
 def idea_texts(response: str, anchors: list[str]) -> list[str]:
     """Each idea's text: from the start of its anchor's line to the next idea's.
 
-    The last idea stops at the next horizontal rule or level-1/2 heading, so a
-    closing section ("What I'd study") is not attributed to it.
+    An idea whose line also holds the previous idea's anchor (a run-on list such
+    as "Runners-up: X ...; Y ...") starts at its own anchor instead. The last
+    idea stops at the next horizontal rule or level-1/2 heading, so a closing
+    section ("What I'd study") is not attributed to it.
     """
     haystack, offsets = normalized_with_offsets(response)
     starts: list[int] = []
     pos = 0
+    prev_anchor = -1
     for anchor in anchors:
         needle, _ = normalized_with_offsets(anchor)
         found = haystack.find(needle, pos)
         if found < 0:
             raise ValueError(f"anchor not found in order: {anchor!r}")
         pos = found + 1
-        starts.append(response.rfind("\n", 0, offsets[found]) + 1)
+        line_start = response.rfind("\n", 0, offsets[found]) + 1
+        starts.append(line_start if line_start > prev_anchor else offsets[found])
+        prev_anchor = offsets[found]
     ends = starts[1:] + [len(response)]
     tail = [response.find(m, starts[-1] + 1) for m in ("\n---", "\n## ", "\n# ")] if starts else []
     if any(t >= 0 for t in tail):
