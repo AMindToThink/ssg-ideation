@@ -37,9 +37,10 @@ GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 
 DEFAULT_NOTE = (
-    "Hits are the DeepSeek V4.1 Flash judge's majority labels (3 samples per idea); * = the "
-    "samples split on that idea. Turn-3 ranks are positions in the model's top-3 list. A read by "
-    "Claude Code Opus 5.5 (results/claude_code_opus_spotcheck.md) disagrees with some judge hits."
+    "Hits are the Claude Opus 5.5 judge's clear labels (median of 3 samples per idea, reasoning effort "
+    "high); * = the samples differ on that idea. Turn-3 ranks are positions in the model's top-3 list. "
+    "The judge matches the Claude Code Opus 5.5 labels' clear hits on all 27 answered responses "
+    "(results/claude_code_opus_spotcheck.md)."
 )
 
 

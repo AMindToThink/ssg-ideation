@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import dataclasses
 import json
 import re
 import shutil
@@ -65,7 +66,10 @@ from ssg_ideation.run import log, preflight, refused_turn
 OPUS_JUDGE: ModelSpec = ModelSpec(
     "claude-opus-5.5", "anthropic/claude-opus-5.5", "anthropic", "max", 128000
 )
-OPUS_JUDGE_DIR: Path = DATA_DIR / "judge_opus"
+# max, high and medium give the same response-level verdicts on the 27 reader-labeled
+# responses; high costs about $0.05 a call against $0.36 at max (2026-10-29).
+JUDGE_EFFORT: str = "high"
+OPUS_JUDGE_DIR: Path = DATA_DIR / "judge_opus"  # calls go to <dir>/<effort>/<model>/
 OPUS_LABELS_PATH: Path = RESULTS_DIR / "opus_judge_labels.json"
 
 LEVELS: tuple[str, ...] = ("none", "near_miss", "borderline", "clear")
@@ -327,10 +331,16 @@ def load_segmentation(spec_key: str, gen: int, turn: int, response: str) -> Segm
     return parse_segmentation(assistant_message(rec)["content"], response)
 
 
+def judge_spec(effort: str) -> ModelSpec:
+    return dataclasses.replace(OPUS_JUDGE, effort=effort)
+
+
 def opus_judge_response(
     client: httpx.Client, api_key: str, spec_key: str, gen: int, turn: int, expected: str,
-    n_samples: int = N_JUDGE_SAMPLES, out_root: Path = OPUS_JUDGE_DIR,
+    n_samples: int = N_JUDGE_SAMPLES, effort: str = JUDGE_EFFORT,
 ) -> dict[str, Any]:
+    spec = judge_spec(effort)
+    out_root = OPUS_JUDGE_DIR / effort
     src = RAW_DIR / spec_key / f"gen{gen}_turn{turn}.json"
     base = {"model_key": spec_key, "generation_index": gen, "turn": turn, "source": src.name}
     record = json.loads(src.read_text())
@@ -344,7 +354,7 @@ def opus_judge_response(
         if not seg.ideas:
             break
         out = out_root / spec_key / f"gen{gen}_turn{turn}_label{s}.json"
-        rec = call(client, api_key, OPUS_JUDGE, [{"role": "user", "content": prompt}], out,
+        rec = call(client, api_key, spec, [{"role": "user", "content": prompt}], out,
                    expected, extra=OPUS_EXTRA,
                    record_extra={**base, "stage": "label", "sample": s, "segmentation_judge": "deepseek"})
         if rec["outcome"] == "refused":
@@ -357,8 +367,12 @@ def opus_judge_response(
         if rec["outcome"] != "ok":
             raise JudgeOutputError(f"Opus judge call {out} ended with outcome {rec['outcome']}")
         msg = assistant_message(rec)
-        if not msg.get("reasoning"):
-            raise JudgeOutputError(f"Opus judge call {out} has no reasoning text")
+        # Below max effort Opus sometimes answers without thinking (0 reasoning tokens).
+        # Reasoning tokens without reasoning text would mean the text was dropped.
+        used = rec["response"]["body"]["usage"]["completion_tokens_details"]["reasoning_tokens"]
+        if used and not msg.get("reasoning"):
+            raise JudgeOutputError(f"Opus judge call {out} used {used} reasoning tokens "
+                                   "but returned no reasoning text")
         try:
             labelings.append(parse_opus_labeling(msg["content"], len(seg.ideas)))
         except JudgeOutputError:
@@ -379,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gens", nargs="+", type=int, default=list(range(1, N_GENERATIONS + 1)))
     ap.add_argument("--turns", nargs="+", type=int, default=list(range(1, N_TURNS + 1)))
     ap.add_argument("--samples", type=int, default=N_JUDGE_SAMPLES)
+    ap.add_argument("--effort", default=JUDGE_EFFORT, help="reasoning effort for the judge")
     ap.add_argument("--labels-out", type=Path, default=OPUS_LABELS_PATH)
     ap.add_argument("--allow-missing", action="store_true",
                     help="skip responses with no target record (incomplete runs); they are listed")
@@ -395,13 +410,13 @@ def main(argv: list[str] | None = None) -> int:
         log(f"MISSING target record {j}; not judged")
     jobs = [j for j in jobs if (RAW_DIR / j[0] / f"gen{j[1]}_turn{j[2]}.json").exists()]
     with make_http_client() as client:
-        expected = preflight(client, {OPUS_JUDGE.api_key_env: api_key}, [OPUS_JUDGE],
-                             judge=True)[OPUS_JUDGE.key]
+        spec = judge_spec(args.effort)
+        expected = preflight(client, {spec.api_key_env: api_key}, [spec], judge=True)[spec.key]
         lock = threading.Lock()
         results: list[dict[str, Any]] = []
 
         def work(job: tuple[str, int, int]) -> None:
-            r = opus_judge_response(client, api_key, *job, expected, args.samples)
+            r = opus_judge_response(client, api_key, *job, expected, args.samples, args.effort)
             with lock:
                 results.append(r)
 
@@ -416,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     results.sort(key=lambda r: (r["model_key"], r["generation_index"], r["turn"]))
     write_json_atomic(args.labels_out, {
         "judge_model": OPUS_JUDGE.model_id, "segmentation": "deepseek (data/judge)",
-        "n_samples": args.samples, "missing": [list(j) for j in missing], "results": results,
+        "effort": args.effort, "n_samples": args.samples, "missing": [list(j) for j in missing], "results": results,
     })
     log(f"OPUS JUDGE COMPLETE: {len(results)} responses -> {args.labels_out}")
     return 0
