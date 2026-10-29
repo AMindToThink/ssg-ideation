@@ -81,6 +81,8 @@ def build_request(
         "max_tokens": spec.max_tokens,
         "stream": False,
     }
+    if spec.effort is None:  # models without reasoning, such as GPT-4
+        del body["reasoning"]
     if extra:
         clash = (set(extra) & set(body)) | (set(extra) & SAMPLING_PARAMS) | ({"tools"} & set(extra))
         if clash:
@@ -136,17 +138,46 @@ def assistant_message(record: dict[str, Any]) -> dict[str, Any]:
     return record["response"]["body"]["choices"][0]["message"]
 
 
-def followup_messages(prev_record: dict[str, Any], prompt: str) -> list[dict[str, Any]]:
+def followup_messages(
+    prev_record: dict[str, Any], prompt: str, require_reasoning: bool = True
+) -> list[dict[str, Any]]:
     """The previous call's messages, its assistant message echoed verbatim (incl.
     reasoning_details), then the next user prompt."""
     prev_assistant = assistant_message(prev_record)
-    if "reasoning_details" not in prev_assistant:
+    if require_reasoning and "reasoning_details" not in prev_assistant:
         raise ValueError("previous assistant message has no reasoning_details to echo")
     return [
         *prev_record["request"]["body"]["messages"],
         prev_assistant,
         {"role": "user", "content": prompt},
     ]
+
+
+def record_message(record: dict[str, Any]) -> dict[str, Any]:
+    """The assistant message of a call record, for either record shape.
+
+    OpenAI-API records (openai_direct.py) carry a chat-style `message`;
+    OpenRouter records keep it in the chat-completions response body.
+    """
+    if "message" in record:
+        return record["message"]
+    return record["response"]["body"]["choices"][0]["message"]
+
+
+def record_stats(record: dict[str, Any]) -> dict[str, Any]:
+    """Finish reasons, token counts and cost of a call record, for either record shape."""
+    if "stats" in record:
+        return record["stats"]
+    choice = (record["response"]["body"].get("choices") or [{}])[0]
+    gen_data = ((record.get("generation") or {}).get("body") or {}).get("data") or {}
+    return {
+        "finish_reason": choice.get("finish_reason"),
+        "native_finish_reason": choice.get("native_finish_reason"),
+        "prompt_tokens": gen_data.get("native_tokens_prompt"),
+        "completion_tokens": gen_data.get("native_tokens_completion"),
+        "reasoning_tokens": gen_data.get("native_tokens_reasoning"),
+        "cost_usd": gen_data.get("total_cost"),
+    }
 
 
 def classify(status: int, body: Any) -> tuple[str, str | None]:
