@@ -183,6 +183,8 @@ def test_sampling_params_and_overrides_rejected(bad: dict[str, Any]) -> None:
 
 
 def test_prompts_are_verbatim_from_post() -> None:
+    if not POST_DRAFT.exists():
+        pytest.skip(f"{POST_DRAFT} is kept out of git; this check runs only where the draft is present")
     text = POST_DRAFT.read_text()
     assert TURN1_PROMPT in text
     assert TURN2_PROMPT in text
