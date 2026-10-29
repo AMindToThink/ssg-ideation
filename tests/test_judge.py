@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from ssg_ideation.config import TURN3_PROMPT
 from ssg_ideation.judge import (
     Idea,
     JudgeOutputError,
@@ -164,3 +165,12 @@ def test_prompts_contain_response_and_anchors() -> None:
     assert RESPONSE in lp and "Agents become one another's trainers" in lp
     assert "reputation and cooperation systems" in lp
     assert "second message" not in lp
+
+
+def test_turn3_prompts_name_the_third_message() -> None:
+    sp = segment_prompt(RESPONSE, 3)
+    assert TURN3_PROMPT in sp and "third message" in sp and "second message" not in sp
+    lp = label_prompt(RESPONSE, 3, [Idea(index=1, title="t", anchor="Agents become one another's trainers")])
+    assert TURN3_PROMPT in lp and "third message" in lp
+    with pytest.raises(ValueError):
+        segment_prompt(RESPONSE, 4)

@@ -1,5 +1,8 @@
 """Figure: SSG hit rate per model (panel A) and per-generation rank strip (panel B).
 
+Models with no answered call (every conversation refused at turn 1) are left out
+of the figure and named in its footnote; they stay in summary.csv and report.md.
+
 Usage:
     uv run python -m ssg_ideation.plot
 """
@@ -21,10 +24,11 @@ from matplotlib.lines import Line2D  # noqa: E402
 from ssg_ideation.analyze import SUMMARY_PATH, hit_counts  # noqa: E402
 from ssg_ideation.config import FIGURES_DIR, N_GENERATIONS  # noqa: E402
 
-# Reference palette from the dataviz skill (light mode): categorical slots 1-3,
-# chart chrome and ink.
-SERIES = {"turn1": "#2a78d6", "turn2": "#eb6834", "either": "#1baf7a"}
-SERIES_LABEL = {"turn1": "Turn 1", "turn2": "Turn 2 (follow-up)", "either": "Either turn"}
+# Reference palette from the dataviz skill (light mode): categorical slots 1-4,
+# chart chrome and ink. Bars are drawn in SERIES order.
+SERIES = {"turn1": "#2a78d6", "turn2": "#eb6834", "either": "#1baf7a", "turn3": "#eda100"}
+SERIES_LABEL = {"turn1": "Turn 1", "turn2": "Turn 2 (follow-up)", "either": "Turn 1 or 2",
+                "turn3": "Turn 3 (SSG in its top 3)"}
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
 INK_2 = "#52514e"
@@ -57,6 +61,13 @@ def _style(ax: Axes) -> None:
     ax.set_axisbelow(True)
 
 
+def drop_unanswered(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """(rows of models with at least one answered call, labels of the dropped models)."""
+    answered = {r["model_key"] for r in rows if r["status"] not in ("refused", "skipped_after_refusal")}
+    dropped = [label for key, label in models_in_order(rows) if key not in answered]
+    return [r for r in rows if r["model_key"] in answered], dropped
+
+
 def models_in_order(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     seen: dict[str, str] = {}
     for r in rows:
@@ -66,11 +77,11 @@ def models_in_order(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
 
 def panel_hit_rate(ax: Axes, rows: list[dict[str, Any]]) -> None:
     models = models_in_order(rows)
-    width = 0.2
-    for j, series in enumerate(("turn1", "turn2", "either")):
+    width = 0.17
+    for j, series in enumerate(SERIES):
         for i, (key, _) in enumerate(models):
             c = hit_counts(rows, key)
-            x = i + (j - 1) * (width + 0.03)
+            x = i + (j - 1.5) * (width + 0.03)
             k = c[series]
             if k > 0:
                 ax.bar(x, k, width=width, color=SERIES[series], linewidth=0, zorder=2)
@@ -78,17 +89,17 @@ def panel_hit_rate(ax: Axes, rows: list[dict[str, Any]]) -> None:
     for i, (key, _) in enumerate(models):
         c = hit_counts(rows, key)
         if c["refused"]:
-            ax.text(i, 1.5, f"{c['refused']} refused call(s);\nno turn 2 after a\nturn-1 refusal",
+            ax.text(i, N_GENERATIONS + 0.3, f"{c['refused']} refused call(s); no later turn after a refusal",
                     ha="center", va="center", fontsize=8, color=INK_2)
     ax.set_xticks(range(len(models)), [label for _, label in models])
     ax.set_xlim(-0.6, len(models) - 0.4)
     ax.set_ylim(0, N_GENERATIONS + 0.5)
     ax.set_yticks(range(N_GENERATIONS + 1))
-    ax.set_ylabel("Generations with an SSG idea", color=INK_2, fontsize=9)
-    ax.set_title("A. How often the model comes up with SSG", loc="left", fontsize=11, color=INK)
+    ax.set_ylabel("Conversations with an SSG idea", color=INK_2, fontsize=9)
+    ax.set_title("A. How often SSG appears, per turn", loc="left", fontsize=11, color=INK)
     handles = [Line2D([], [], marker="s", linestyle="", markersize=8, color=SERIES[s], label=SERIES_LABEL[s])
-               for s in ("turn1", "turn2", "either")]
-    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper right", labelcolor=INK_2)
+               for s in SERIES]
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper left", labelcolor=INK_2, ncols=2)
 
 
 def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
@@ -98,7 +109,7 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     bottom = max_rank + 2  # band below the ranks for misses and refusals
     for i, (key, _) in enumerate(models):
         for r in (r for r in rows if r["model_key"] == key):
-            dx = (r["turn"] - 1.5) * 0.44 + (r["generation"] - 2) * 0.14
+            dx = (r["turn"] - 2) * 0.3 + (r["generation"] - 2) * 0.09
             x = i + dx
             color = SERIES[f"turn{r['turn']}"]
             if r["hit"]:
@@ -118,11 +129,13 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     ax.set_xticks(range(len(models)), [label for _, label in models])
     ax.set_xlim(-0.6, len(models) - 0.4)
     ax.set_ylabel("Rank of first SSG idea in the response", color=INK_2, fontsize=9)
-    ax.set_title("B. Where SSG appears in each response (dot = one generation-turn)", loc="left",
+    ax.set_title("B. Where SSG appears in each response (dot = one conversation-turn)", loc="left",
                  fontsize=11, color=INK)
     handles = [
         Line2D([], [], marker="o", linestyle="", markersize=8, color=SERIES["turn1"], label="Turn 1 hit"),
         Line2D([], [], marker="o", linestyle="", markersize=8, color=SERIES["turn2"], label="Turn 2 hit"),
+        Line2D([], [], marker="o", linestyle="", markersize=8, color=SERIES["turn3"],
+               label="Turn 3 hit (rank within top 3)"),
         Line2D([], [], marker="o", linestyle="", markersize=8, markerfacecolor="none",
                markeredgecolor=MUTED, label="Miss"),
         Line2D([], [], marker="x", linestyle="", markersize=8, color=MUTED, markeredgewidth=2,
@@ -132,12 +145,16 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
 
 
 def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None) -> list[Path]:
-    fig, (a, b) = plt.subplots(1, 2, figsize=(13, 4.8), facecolor=SURFACE)
+    rows, dropped = drop_unanswered(rows)
+    if dropped:
+        note = " ".join(filter(None, [note, f"Not shown: {', '.join(dropped)} (every conversation "
+                                            "was refused at turn 1; see report.md)."]))
+    fig, (a, b) = plt.subplots(1, 2, figsize=(14, 5.2), facecolor=SURFACE)
     for ax in (a, b):
         _style(ax)
     panel_hit_rate(a, rows)
     panel_rank_strip(b, rows)
-    lines = textwrap.wrap(note, 170) if note else []
+    lines = textwrap.wrap(note, 180) if note else []
     fig.tight_layout(rect=(0, 0.035 * len(lines), 1, 1))
     if lines:
         fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
