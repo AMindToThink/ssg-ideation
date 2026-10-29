@@ -7,6 +7,7 @@ Usage:
 import argparse
 import csv
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,7 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     bottom = max_rank + 2  # band below the ranks for misses and refusals
     for i, (key, _) in enumerate(models):
         for r in (r for r in rows if r["model_key"] == key):
-            dx = (r["turn"] - 1.5) * 0.36 + (r["generation"] - 2) * 0.1
+            dx = (r["turn"] - 1.5) * 0.44 + (r["generation"] - 2) * 0.14
             x = i + dx
             color = SERIES[f"turn{r['turn']}"]
             if r["hit"]:
@@ -127,7 +128,7 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
         Line2D([], [], marker="x", linestyle="", markersize=8, color=MUTED, markeredgewidth=2,
                label="Refused"),
     ]
-    ax.legend(handles=handles, frameon=False, fontsize=8, loc="lower right", labelcolor=INK_2, ncols=2)
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper right", labelcolor=INK_2, ncols=2)
 
 
 def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None) -> list[Path]:
@@ -136,9 +137,10 @@ def make_figure(rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: s
         _style(ax)
     panel_hit_rate(a, rows)
     panel_rank_strip(b, rows)
-    fig.tight_layout(rect=(0, 0.05 if note else 0, 1, 1))
-    if note:
-        fig.text(0.01, 0.01, note, fontsize=8, color=INK_2, ha="left", va="bottom")
+    lines = textwrap.wrap(note, 170) if note else []
+    fig.tight_layout(rect=(0, 0.035 * len(lines), 1, 1))
+    if lines:
+        fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = [out_dir / "ssg_ideation.png", out_dir / "ssg_ideation.pdf"]
     for p in paths:
