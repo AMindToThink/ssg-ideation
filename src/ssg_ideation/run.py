@@ -82,7 +82,7 @@ def validate_model(
     if spec.model_id not in models:
         raise RuntimeError(f"{spec.model_id} is not listed in /models")
     efforts = (models[spec.model_id].get("reasoning") or {}).get("supported_efforts") or []
-    if spec.effort not in efforts:
+    if spec.effort is not None and spec.effort not in efforts:
         raise RuntimeError(f"{spec.model_id}: effort {spec.effort!r} not in supported_efforts {efforts}")
     matches = [e for e in endpoints["data"]["endpoints"] if e["tag"] == spec.provider]
     if len(matches) != 1:
@@ -129,8 +129,9 @@ def preflight(
     write_json_atomic(snap / "models.json", models_json)
     models = {m["id"]: m for m in models_json["data"]}
     expected: dict[str, str] = {}
-    required = {"reasoning", "max_tokens"} | ({"response_format"} if judge else set())
     for spec in specs:
+        required = ({spec.max_tokens_param} | ({"reasoning"} if spec.effort is not None else set())
+                    | ({"response_format"} if judge else set()))
         if spec.model_id not in models:
             raise RuntimeError(f"{spec.model_id} is not listed in /models")
         endpoints = get_json(client, f"/models/{spec.model_id}/endpoints")
@@ -163,7 +164,7 @@ def run_conversation(
                 log(f"SKIP {spec.key} gen{gen} turn{turn}: turn {refused} was refused")
                 return
             prev = json.loads(raw_path(spec, gen, turn - 1).read_text())
-            messages = followup_messages(prev, TURN_PROMPTS[turn])
+            messages = followup_messages(prev, TURN_PROMPTS[turn], require_reasoning=spec.effort is not None)
         resumed = out.exists()
         log(f"{'RESUME' if resumed else 'START'} {spec.key} gen{gen} turn{turn} key={spec.api_key_env}")
         try:

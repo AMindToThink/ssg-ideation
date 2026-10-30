@@ -2,6 +2,7 @@
 
 Writes results/explorer/responses.json (one row per model, generation and turn)
 and results/explorer/ideas.json (one row per idea in the judge's segmentation,
+for the current models and the OpenAI timeline (flags in_current / in_timeline),
 with the idea's text cut from the response). The reader's labels (the Claude Code
 Opus 5.5 read) come from results/reader_labels.csv, which transcribes
 results/claude_code_opus_spotcheck.md onto the judge's idea numbering.
@@ -16,11 +17,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ssg_ideation.analyze import SUMMARY_PATH, load_labels, load_reader, load_records
+from ssg_ideation.analyze import LABEL_LETTER, SUMMARY_PATH, load_labels, load_reader, load_records
 from ssg_ideation.client import write_json_atomic
-from ssg_ideation.config import RESULTS_DIR, TARGET_MODELS
+from ssg_ideation.config import RESULTS_DIR, TARGET_MODELS, TIMELINE, model_by_key
 from ssg_ideation.judge import _QUOTES, judge_content
 from ssg_ideation.plot import read_summary
+from ssg_ideation.timeline import LABELS_PATH as TIMELINE_LABELS_PATH
+from ssg_ideation.timeline import SUMMARY_PATH as TIMELINE_SUMMARY_PATH
 
 EXPLORER_DIR: Path = RESULTS_DIR / "explorer"
 
@@ -91,6 +94,8 @@ def build(
             "judge_rank": s["first_ssg_rank"], "n_ideas": s["n_ideas"],
             "judge_split": s["rank_label"].endswith("*"), "judge_ssg": s["ssg_ranks"] or "",
             "judge_near": s["near_miss_ranks"] or "",
+            "judge_borderline": s["borderline_ranks"] or "",
+            "judge_hit_any": s["judge_hit_any"], "judge_rank_any": s["judge_rank_any"],
             "cost_usd": float(s["cost_usd"]) if s["cost_usd"] else None,
             "reasoning_tokens": int(s["reasoning_tokens"]) if s["reasoning_tokens"] else None,
             "completion_tokens": int(s["completion_tokens"]) if s["completion_tokens"] else None,
@@ -125,6 +130,8 @@ def build(
                 "is_ssg": idea["is_ssg"],
                 "near_votes": "".join("Y" if v else "n" for v in idea["near_miss_votes"]),
                 "is_near_miss": idea["is_near_miss"],
+                "label": idea["label"],
+                "labels": "".join(LABEL_LETTER[x] for x in idea["labels"]),
                 "reader": "clear" if i in rd["clear"] else "borderline" if i in rd["borderline"] else "",
                 **{f"rationale_{j + 1}": r for j, r in enumerate(idea["rationales"])},
                 "text": text,
@@ -136,8 +143,20 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=EXPLORER_DIR)
     args = ap.parse_args(argv)
-    keys = [m.key for m in TARGET_MODELS]
-    responses, ideas = build(read_summary(SUMMARY_PATH), load_records(keys), load_labels(), load_reader())
+    current = [m.key for m in TARGET_MODELS]
+    timeline = {p.key: p for p in TIMELINE}
+    keys = current + [k for k in timeline if k not in current]
+    # The timeline summary repeats GPT-6 Astra's current-models rows; keep one copy.
+    summary = read_summary(SUMMARY_PATH) + [
+        r for r in read_summary(TIMELINE_SUMMARY_PATH) if r["model_key"] not in current
+    ]
+    labels = load_labels() | load_labels(TIMELINE_LABELS_PATH)
+    responses, ideas = build(summary, load_records(keys), labels, load_reader())
+    for r in responses:
+        point = timeline.get(r["model_key"])
+        r |= {"model": model_by_key(r["model_key"]).label, "in_current": r["model_key"] in current,
+              "in_timeline": point is not None, "released": point.released if point else None,
+              "pro": point.pro if point else False}
     write_json_atomic(args.out / "responses.json", responses)
     write_json_atomic(args.out / "ideas.json", ideas)
     print(f"wrote {len(responses)} responses and {len(ideas)} ideas to {args.out}")

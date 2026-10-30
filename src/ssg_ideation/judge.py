@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ssg_ideation.client import (
     assistant_message,
+    record_message,
     call,
     error_path,
     load_api_key,
@@ -247,7 +248,7 @@ def normalize(text: str) -> str:
 
 
 def judge_content(record: dict[str, Any]) -> str:
-    content = record["response"]["body"]["choices"][0]["message"]["content"]
+    content = record_message(record)["content"]
     if not isinstance(content, str) or not content.strip():
         raise ValueError("record has no response text")
     return content
@@ -377,8 +378,12 @@ def _judged_call(
 
 
 def judge_response(
-    client: httpx.Client, api_key: str, spec: ModelSpec, gen: int, turn: int, expected: str
+    client: httpx.Client, api_key: str, spec: ModelSpec, gen: int, turn: int, expected: str,
+    segment_only: bool = False,
 ) -> dict[str, Any]:
+    """Segment and label one response. With segment_only, stop after segmentation
+    (so the Claude Code Opus 5.5 labels can use the judge's numbering without
+    seeing the judge's labels) and return the idea list."""
     src = RAW_DIR / spec.key / f"gen{gen}_turn{turn}.json"
     base = {"model_key": spec.key, "generation_index": gen, "turn": turn, "source": str(src.name)}
     if not src.exists():
@@ -393,6 +398,10 @@ def judge_response(
         client, api_key, segment_prompt(response, turn), out_dir / f"{stem}_segment.json",
         expected, {**base, "stage": "segment"}, lambda c: parse_segmentation(c, response),
     )
+    if segment_only:
+        log(f"SEGMENTED {spec.key} gen{gen} turn{turn}: {len(seg.ideas)} ideas")
+        return {**base, "api_refused": False, "is_refusal": seg.is_refusal,
+                "ideas": [i.model_dump() for i in seg.ideas]}
     labelings: list[Labeling] = []
     if seg.ideas:
         for s in range(1, N_JUDGE_SAMPLES + 1):
@@ -414,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gens", nargs="+", type=int, default=list(range(1, N_GENERATIONS + 1)))
     ap.add_argument("--turns", nargs="+", type=int, default=list(range(1, N_TURNS + 1)))
     ap.add_argument("--labels-out", type=Path, default=LABELS_PATH)
+    ap.add_argument("--segment-only", action="store_true",
+                    help="only split responses into ideas; write the idea lists to --labels-out")
     args = ap.parse_args(argv)
     api_key = load_api_key(JUDGE_MODEL.api_key_env)
     jobs = [
@@ -436,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
                 if refused_turn(spec, gen, turn) is not None:
                     return  # no turn is run after a refusal
                 raise FileNotFoundError(f"missing target record {src}")
-            r = judge_response(client, api_key, spec, gen, turn, expected)
+            r = judge_response(client, api_key, spec, gen, turn, expected, args.segment_only)
             with lock:
                 results.append(r)
 
@@ -449,7 +460,8 @@ def main(argv: list[str] | None = None) -> int:
         log(f"JUDGE FAILED: {len(errors)} response(s) failed; rerun to retry them")
         return 1
     results.sort(key=lambda r: (r["model_key"], r["generation_index"], r["turn"]))
-    write_json_atomic(args.labels_out, {"judge_model": JUDGE_MODEL.model_id, "results": results})
+    write_json_atomic(args.labels_out, {"judge_model": JUDGE_MODEL.model_id,
+                                        "segment_only": args.segment_only, "results": results})
     log(f"JUDGE COMPLETE: {len(results)} responses -> {args.labels_out}")
     return 0
 

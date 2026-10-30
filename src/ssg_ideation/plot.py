@@ -37,19 +37,21 @@ GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 
 DEFAULT_NOTE = (
-    "Hits are the DeepSeek V4.1 Flash judge's majority labels (3 samples per idea); * = the "
-    "samples split on that idea. Turn-3 ranks are positions in the model's top-3 list. A read by "
-    "Claude Code Opus 5.5 (results/claude_code_opus_spotcheck.md) disagrees with some judge hits."
+    "Hits are the Claude Opus 5.5 judge's clear labels (median of 3 samples per idea, reasoning effort "
+    "high); * = the samples differ on that idea. Turn-3 ranks are positions in the model's top-3 list. "
+    "The judge matches the Claude Code Opus 5.5 labels' clear hits on all 27 answered responses "
+    "(results/claude_code_opus_spotcheck.md)."
 )
 
 
 def read_summary(path: Path = SUMMARY_PATH) -> list[dict[str, Any]]:
     def parse(r: dict[str, str]) -> dict[str, Any]:
         out: dict[str, Any] = dict(r)
-        for k in ("generation", "turn", "first_ssg_rank", "n_ideas", "claude_rank", "claude_rank_any"):
+        for k in ("generation", "turn", "first_ssg_rank", "n_ideas", "claude_rank", "claude_rank_any",
+                  "judge_rank_any"):
             if k in r:
                 out[k] = int(r[k]) if r[k] else None
-        for k in ("hit", "refused", "truncated", "claude_hit", "claude_hit_any"):
+        for k in ("hit", "refused", "truncated", "claude_hit", "claude_hit_any", "judge_hit_any"):
             if k in r:
                 out[k] = r[k] == "True"
         return out
