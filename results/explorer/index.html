@@ -569,9 +569,9 @@
     const models = [...new Map(rows.map((r) => [r.model_key, r])).values()]
       .sort((a, b) => String(a.released).localeCompare(String(b.released)) || Number(yes(a.pro)) - Number(yes(b.pro)));
     const n = d3.max(rows, (r) => Number(r.conversations)) || 3;
-    const W = Math.max(900, el.clientWidth || 900);
-    const H = 320;
-    const margin = {top: 18, right: 6, bottom: 48, left: 24};
+    const W = Math.max(1040, el.clientWidth || 1040);
+    const H = 350;
+    const margin = {top: 18, right: 6, bottom: 70, left: 24};
     const x = d3.scaleBand(models.map((r) => r.model_key), [margin.left, W - margin.right]).paddingInner(0.16).paddingOuter(0.04);
     const xs = d3.scaleBand(SERIES.map((s) => s.measure), [0, x.bandwidth()]).padding(0.1);
     const y = d3.scaleLinear([0, n], [H - margin.bottom, margin.top]);
@@ -595,11 +595,26 @@
       .attr('height', (r) => y(0) - y(Number(r.hits))).attr('rx', 2).style('fill', (r) => color[r.measure]);
     g.selectAll('text').data(rows).join('text').attr('class', 'sx-val').attr('text-anchor', 'middle')
       .attr('x', (r) => bx(r) + xs.bandwidth() / 2).attr('y', (r) => y(Number(r.hits)) - 5).text((r) => r.hits);
-    const ticks = svg.append('g').selectAll('text').data(models).join('text').attr('class', 'sx-model').attr('text-anchor', 'middle')
-      .attr('x', (r) => x(r.model_key) + x.bandwidth() / 2).attr('y', H - 28);
-    ticks.append('tspan').text((r) => r.model);
-    ticks.append('tspan').attr('class', 'sx-tick').attr('x', (r) => x(r.model_key) + x.bandwidth() / 2).attr('dy', '1.3em')
-      .text((r) => (parseDay(String(r.released)) ? month(parseDay(String(r.released))) : ''));
+    // Names wrap to the column width; the snapshot in parentheses is left to the tooltip.
+    const maxChars = Math.max(4, Math.floor(step / 7.5));
+    const wrap = (name) => {
+      const lines = [];
+      for (const w of String(name).replace(/\s*\(.*\)$/, '').split(' ')) {
+        const last = lines[lines.length - 1];
+        if (last && `${last} ${w}`.length <= maxChars) lines[lines.length - 1] = `${last} ${w}`;
+        else lines.push(w);
+      }
+      return lines;
+    };
+    const ticks = svg.append('g').selectAll('text').data(models).join('text').attr('class', 'sx-model')
+      .attr('text-anchor', 'middle').attr('y', H - margin.bottom + 16);
+    ticks.each(function (r) {
+      const cx = x(r.model_key) + x.bandwidth() / 2;
+      const t = d3.select(this);
+      wrap(r.model).forEach((line, i) => t.append('tspan').attr('x', cx).attr('dy', i ? '1.15em' : 0).text(line));
+      const day = parseDay(String(r.released));
+      t.append('tspan').attr('class', 'sx-tick').attr('x', cx).attr('dy', '1.3em').text(day ? month(day) : '');
+    });
     const tip = node('div', 'sx-tip');
     tip.hidden = true;
     el.append(tip);
@@ -619,7 +634,7 @@
         const gens = String(r.which || '').split(' ').filter(Boolean);
         const day = parseDay(String(r.released));
         tip.replaceChildren(
-          node('div', 'sx-tip-k', `${r.model}${yes(r.pro) ? ' (Pro)' : ''} · released ${day ? month(day) : r.released} · ${label[r.measure]}`),
+          node('div', 'sx-tip-k', `${r.model} · released ${day ? month(day) : r.released} · ${label[r.measure]}`),
           node('div', 'sx-tip-t', `${r.hits} of ${r.conversations} conversations`),
           node('div', 'sx-tip-m', gens.length ? `Conversations ${gens.join(', ')}, counted by ${MODE_NAME[m]}. Click to open the first.` : `None, counted by ${MODE_NAME[m]}`));
         placeTip(el, tip, event.currentTarget);
