@@ -40,7 +40,7 @@ SUMMARY_FIELDS: list[str] = [
     "first_ssg_rank", "n_ideas", "rank_label", "ssg_ranks", "judge_hit_any", "judge_rank_any",
     "borderline_ranks", "near_miss_ranks", "disagreements",
     "ssg_anywhere", "judge_says_refusal", "finish_reason", "native_finish_reason",
-    "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost_usd", "latency_s",
+    "prompt_tokens", "completion_tokens", "reasoning_tokens", "cost_usd", "latency_s", "served_model",
 ]
 
 

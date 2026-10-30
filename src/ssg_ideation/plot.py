@@ -47,10 +47,11 @@ DEFAULT_NOTE = (
 def read_summary(path: Path = SUMMARY_PATH) -> list[dict[str, Any]]:
     def parse(r: dict[str, str]) -> dict[str, Any]:
         out: dict[str, Any] = dict(r)
-        for k in ("generation", "turn", "first_ssg_rank", "n_ideas", "claude_rank", "claude_rank_any"):
+        for k in ("generation", "turn", "first_ssg_rank", "n_ideas", "claude_rank", "claude_rank_any",
+                  "judge_rank_any"):
             if k in r:
                 out[k] = int(r[k]) if r[k] else None
-        for k in ("hit", "refused", "truncated", "claude_hit", "claude_hit_any"):
+        for k in ("hit", "refused", "truncated", "claude_hit", "claude_hit_any", "judge_hit_any"):
             if k in r:
                 out[k] = r[k] == "True"
         return out

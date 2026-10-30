@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ssg_ideation.analyze import SUMMARY_PATH, load_labels, load_reader, load_records
+from ssg_ideation.analyze import LABEL_LETTER, SUMMARY_PATH, load_labels, load_reader, load_records
 from ssg_ideation.client import write_json_atomic
 from ssg_ideation.config import RESULTS_DIR, TARGET_MODELS
 from ssg_ideation.judge import _QUOTES, judge_content
@@ -91,6 +91,8 @@ def build(
             "judge_rank": s["first_ssg_rank"], "n_ideas": s["n_ideas"],
             "judge_split": s["rank_label"].endswith("*"), "judge_ssg": s["ssg_ranks"] or "",
             "judge_near": s["near_miss_ranks"] or "",
+            "judge_borderline": s["borderline_ranks"] or "",
+            "judge_hit_any": s["judge_hit_any"], "judge_rank_any": s["judge_rank_any"],
             "cost_usd": float(s["cost_usd"]) if s["cost_usd"] else None,
             "reasoning_tokens": int(s["reasoning_tokens"]) if s["reasoning_tokens"] else None,
             "completion_tokens": int(s["completion_tokens"]) if s["completion_tokens"] else None,
@@ -125,6 +127,8 @@ def build(
                 "is_ssg": idea["is_ssg"],
                 "near_votes": "".join("Y" if v else "n" for v in idea["near_miss_votes"]),
                 "is_near_miss": idea["is_near_miss"],
+                "label": idea["label"],
+                "labels": "".join(LABEL_LETTER[x] for x in idea["labels"]),
                 "reader": "clear" if i in rd["clear"] else "borderline" if i in rd["borderline"] else "",
                 **{f"rationale_{j + 1}": r for j, r in enumerate(idea["rationales"])},
                 "text": text,
