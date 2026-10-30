@@ -1,3 +1,5 @@
+> **Status: done (2026-10-30).** These handoff notes date from before implementation, and their "not started" and next-step instructions are out of date. Implementation is complete; see the README.
+
 # Handoff notes (planning session, 2026-10-28)
 
 Planning is done and implementation has **not started**. `PLAN.md` is the approved plan. To continue on a new machine:
