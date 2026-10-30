@@ -121,7 +121,8 @@ definition and its positive and negative anchors. It contains no labeled respons
 
 **Validation.** `uv run python -m ssg_ideation.validate_judge` compares a judge's labels with
 `results/reader_labels.csv` and exits 1 unless (a) every reader-clear response is a clear hit at
-a reader-clear idea, and (b) no other response is a clear hit. On the 27 current-model
+a reader-clear idea, (b) no other response is a clear hit, and (c) every reader-clear idea is
+labeled clear or borderline. On the 27 current-model
 responses the Opus judge passes at reasoning effort `max`, `high` and `medium`, with the same
 response-level verdicts at all three (clear-hit agreement 27/27; three-way agreement 25/27, where both
 differences are reader-miss responses that the judge calls borderline). `high` was kept: it costs
