@@ -78,6 +78,8 @@
   .sx-table .sx-num { text-align: right; }
   .sx-foot { display: grid; gap: var(--cds-gap-xs); }
   .sx-foot a { color: inherit; }
+  .sx-scroll { overflow-x: auto; }
+  .sx-sw-pro { background: var(--cds-chart-grid); }
   .sx [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
 </style>
 
@@ -139,6 +141,22 @@
     </section>
   </div>
 
+  <section class="sx-card" id="timeline" aria-labelledby="timeline-h">
+    <h2 id="timeline-h">When did OpenAI's models start finding SSG?</h2>
+    <p class="sx-note">The strongest OpenAI model at each point in time, Pro variants included (shaded columns), asked the same three questions in three fresh conversations. Bars count conversations with an idea counted as SSG under the labels chosen above. Hover a bar for details; click it to open the first such conversation below.</p>
+    <p class="sx-note">GPT-4 Turbo, o1 and o1-pro are no longer served and were not tested. GPT-3.5 Turbo, GPT-4 and GPT-4o ran on Azure through OpenRouter, GPT-6 Astra is the current-models run, and the rest ran on the OpenAI API at each model's highest reasoning effort. The timeline's Claude Code Opus 5.5 labels were written without seeing the judge's; the experimenter ruled on the six responses where the two disagreed and sided with the judge each time.</p>
+    <ul class="sx-legend">
+      <li><i class="sx-sw" data-c="0"></i>Turn 1</li>
+      <li><i class="sx-sw" data-c="1"></i>Turn 2</li>
+      <li><i class="sx-sw" data-c="2"></i>Turn 1 or 2</li>
+      <li><i class="sx-sw" data-c="3"></i>Turn 3 (top 3)</li>
+      <li><i class="sx-sw sx-sw-pro"></i>Pro variant</li>
+    </ul>
+    <div class="sx-scroll">
+      <div class="sx-plot dash-skeleton" data-draw="timeline" data-source="hit_counts responses"></div>
+    </div>
+  </section>
+
   <section class="sx-card" id="detail" aria-labelledby="detail-h">
     <h2 id="detail-h">Selected response</h2>
     <p class="sx-note">Ideas counted as SSG by Claude Code Opus 5.5 or the judge start open. Each idea shows its text from the response and the judge's three labels with their reasons.</p>
@@ -197,6 +215,8 @@
             const withSsg = gens.filter((g) =>
               mine.some((r) => Number(r.generation) === g && turns.includes(Number(r.turn)) && hit(r)));
             return {model_key: m, model: mine[0].model, answered, measure, labels,
+                    in_current: String(mine[0].in_current) === 'true', in_timeline: String(mine[0].in_timeline) === 'true',
+                    released: mine[0].released, pro: String(mine[0].pro) === 'true',
                     hits: withSsg.length, conversations: gens.length, which: withSsg.join(' ')};
           }));
       });
@@ -321,7 +341,7 @@
     el.classList.remove('dash-skeleton');
     el.replaceChildren();
     const m = mode();
-    const rows = d.data.filter((r) => String(r.answered) === 'true' && r.labels === m);
+    const rows = d.data.filter((r) => String(r.answered) === 'true' && r.labels === m && yes(r.in_current));
     const models = [...new Map(rows.map((r) => [r.model_key, r.model])).entries()];
     const n = d3.max(rows, (r) => Number(r.conversations)) || 3;
     const W = Math.max(300, el.clientWidth || 600);
@@ -377,7 +397,7 @@
     el.replaceChildren();
     const m = mode();
     const sel = dash.params().sel;
-    const shown = new Set(R.rows.filter(answered).map((r) => r.model_key));
+    const shown = new Set(R.rows.filter((r) => answered(r) && yes(r.in_current)).map((r) => r.model_key));
     const pts = R.rows.filter((r) => shown.has(r.model_key) && r.status !== 'skipped_after_refusal' && r.status !== 'refused');
     const models = [...new Map(pts.map((r) => [r.model_key, r.model])).entries()];
     const maxRank = Math.max(3, d3.max(pts, (r) => rankOf(r, m)) || 1);
@@ -534,6 +554,85 @@
       ol.append(li);
     }
     el.append(ol);
+  });
+
+  // Timeline: conversations with SSG per OpenAI model, in release order.
+  const parseDay = d3.utcParse('%Y-%m-%d');
+  const month = d3.utcFormat('%b %Y');
+  dash.draw('timeline', (el) => {
+    const d = dash.data('hit_counts');
+    if (d.status !== 'ok') return notReady(el, d.status);
+    el.classList.remove('dash-skeleton');
+    el.replaceChildren();
+    const m = mode();
+    const rows = d.data.filter((r) => yes(r.in_timeline) && r.labels === m);
+    const models = [...new Map(rows.map((r) => [r.model_key, r])).values()]
+      .sort((a, b) => String(a.released).localeCompare(String(b.released)) || Number(yes(a.pro)) - Number(yes(b.pro)));
+    const n = d3.max(rows, (r) => Number(r.conversations)) || 3;
+    const W = Math.max(900, el.clientWidth || 900);
+    const H = 320;
+    const margin = {top: 18, right: 6, bottom: 48, left: 24};
+    const x = d3.scaleBand(models.map((r) => r.model_key), [margin.left, W - margin.right]).paddingInner(0.16).paddingOuter(0.04);
+    const xs = d3.scaleBand(SERIES.map((s) => s.measure), [0, x.bandwidth()]).padding(0.1);
+    const y = d3.scaleLinear([0, n], [H - margin.bottom, margin.top]);
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).style('min-width', `${W}px`)
+      .attr('role', 'img').attr('aria-label', `Conversations with SSG per OpenAI model in release order, counted by ${MODE_NAME[m]}`);
+    const step = x.step();
+    svg.append('g').selectAll('rect').data(models.filter((r) => yes(r.pro))).join('rect')
+      .attr('x', (r) => x(r.model_key) - (step - x.bandwidth()) / 2).attr('width', step)
+      .attr('y', margin.top).attr('height', y(0) - margin.top).style('fill', 'var(--cds-chart-grid)').style('opacity', 0.5);
+    svg.append('g').selectAll('line').data(d3.range(0, n + 1)).join('line')
+      .attr('x1', margin.left).attr('x2', W - margin.right).attr('y1', (v) => y(v)).attr('y2', (v) => y(v))
+      .style('stroke', (v) => (v === 0 ? 'var(--cds-chart-axis)' : 'var(--cds-chart-grid)'));
+    svg.append('g').selectAll('text').data(d3.range(0, n + 1)).join('text').attr('class', 'sx-tick')
+      .attr('x', margin.left - 8).attr('y', (v) => y(v)).attr('dy', '0.32em').attr('text-anchor', 'end').text((v) => v);
+    const color = Object.fromEntries(SERIES.map((s) => [s.measure, dash.colors[s.c]]));
+    const label = Object.fromEntries(SERIES.map((s) => [s.measure, s.label]));
+    const bx = (r) => x(r.model_key) + xs(r.measure);
+    const g = svg.append('g');
+    g.selectAll('rect').data(rows.filter((r) => Number(r.hits) > 0)).join('rect')
+      .attr('x', bx).attr('width', xs.bandwidth()).attr('y', (r) => y(Number(r.hits)))
+      .attr('height', (r) => y(0) - y(Number(r.hits))).attr('rx', 2).style('fill', (r) => color[r.measure]);
+    g.selectAll('text').data(rows).join('text').attr('class', 'sx-val').attr('text-anchor', 'middle')
+      .attr('x', (r) => bx(r) + xs.bandwidth() / 2).attr('y', (r) => y(Number(r.hits)) - 5).text((r) => r.hits);
+    const ticks = svg.append('g').selectAll('text').data(models).join('text').attr('class', 'sx-model').attr('text-anchor', 'middle')
+      .attr('x', (r) => x(r.model_key) + x.bandwidth() / 2).attr('y', H - 28);
+    ticks.append('tspan').text((r) => r.model);
+    ticks.append('tspan').attr('class', 'sx-tick').attr('x', (r) => x(r.model_key) + x.bandwidth() / 2).attr('dy', '1.3em')
+      .text((r) => (parseDay(String(r.released)) ? month(parseDay(String(r.released))) : ''));
+    const tip = node('div', 'sx-tip');
+    tip.hidden = true;
+    el.append(tip);
+    const firstHit = (r) => {
+      const R = responses();
+      if (R.status !== 'ok') return null;
+      const turns = {turn1: [1], turn2: [2], either: [1, 2], turn3: [3]}[r.measure];
+      const hits = R.rows.filter((x2) => x2.model_key === r.model_key && turns.includes(x2.turn) && rankOf(x2, m) != null)
+        .sort((a, b) => a.generation - b.generation || a.turn - b.turn);
+      return hits.length ? hits[0].key : null;
+    };
+    svg.append('g').selectAll('rect').data(rows).join('rect').attr('class', 'sx-hit')
+      .attr('x', bx).attr('width', xs.bandwidth()).attr('y', margin.top).attr('height', y(0) - margin.top)
+      .style('fill', 'transparent').attr('tabindex', 0).attr('role', 'button')
+      .attr('aria-label', (r) => `${r.model}, ${label[r.measure]}: ${r.hits} of ${r.conversations}`)
+      .on('pointerenter focus', (event, r) => {
+        const gens = String(r.which || '').split(' ').filter(Boolean);
+        const day = parseDay(String(r.released));
+        tip.replaceChildren(
+          node('div', 'sx-tip-k', `${r.model}${yes(r.pro) ? ' (Pro)' : ''} · released ${day ? month(day) : r.released} · ${label[r.measure]}`),
+          node('div', 'sx-tip-t', `${r.hits} of ${r.conversations} conversations`),
+          node('div', 'sx-tip-m', gens.length ? `Conversations ${gens.join(', ')}, counted by ${MODE_NAME[m]}. Click to open the first.` : `None, counted by ${MODE_NAME[m]}`));
+        placeTip(el, tip, event.currentTarget);
+      })
+      .on('pointerleave blur', () => hideTip(tip))
+      .on('click', (event, r) => { const k = firstHit(r); if (k) openDetail(k); })
+      .on('keydown', (event, r) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          const k = firstHit(r);
+          if (k) openDetail(k);
+        }
+      });
   });
 
   // Table of every response that was sent.
