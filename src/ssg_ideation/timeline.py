@@ -43,6 +43,7 @@ LABELS_PATH: Path = RESULTS_DIR / "timeline_opus_judge_labels.json"
 # The new timeline rows were not spot-checked by Matthew; GPT-6 Astra's were (current-models run).
 CLAUDE_NAME = "Claude Code Opus 5.5 labels"
 MEASURES: tuple[str, ...] = ("turn1", "turn2", "either", "turn3")
+MEASURE_NAME = {"turn1": "turn 1", "turn2": "turn 2", "either": "turn 1 or 2", "turn3": "turn 3"}
 
 REPORT_INTRO = (
     "The strongest OpenAI model at each point in time, Pro variants included, asked the same three "
@@ -83,13 +84,31 @@ def _month(iso: str) -> str:
     return date.fromisoformat(iso).strftime("%b %Y")
 
 
+def pro_note(counts: list[dict[str, Any]]) -> str:
+    """Caption sentence comparing each Pro variant with its base model (key without "-pro")."""
+    by_key = {c["key"]: c for c in counts}
+    pros = [c for c in counts if c["pro"]]
+    better = [(c, by_key[c["key"].removesuffix("-pro")], m) for c in pros for m in MEASURES
+              if c[m] > by_key[c["key"].removesuffix("-pro")][m]]
+    names = ", ".join(c["label"] for c in pros)
+    if not better:
+        return f"Not shown: the Pro variants ({names}), each of which did the same as or worse than its base model."
+    beats = "; ".join(f"{MEASURE_NAME[m]}, where {c['label']} had {c[m]} and {b['label']} had {b[m]}"
+                      for c, b, m in better)
+    return (f"Not shown: the Pro variants ({names}). Each did the same as or worse than its base model on every "
+            f"measure except {beats}.")
+
+
+def unavailable_note() -> str:
+    names = ", ".join(f"{label} ({_month(released)})" for label, released in TIMELINE_UNAVAILABLE)
+    return f"Not tested: {names}, which were the best available at their time but are no longer served."
+
+
 def make_figure(counts: list[dict[str, Any]], note: str, out_dir: Path, name: str) -> list[Path]:
-    """Grouped bars per model in release order; retired models appear as labelled gaps."""
-    cols: list[dict[str, Any]] = [dict(c, kind="model") for c in counts]
-    cols += [{"kind": "gap", "label": label, "released": released} for label, released in TIMELINE_UNAVAILABLE]
-    cols.sort(key=lambda c: (c["released"], c["kind"] == "model", c.get("pro", False)))
-    n = max(c["n"] for c in counts)
-    fig, ax = plt.subplots(figsize=(19, 6.2), facecolor=SURFACE)
+    """Grouped bars per non-Pro model in release order; Pro and retired models are described in `note`."""
+    cols = sorted((c for c in counts if not c["pro"]), key=lambda c: c["released"])
+    n = max(c["n"] for c in cols)
+    fig, ax = plt.subplots(figsize=(14, 6.2), facecolor=SURFACE)
     ax.set_facecolor(SURFACE)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -100,20 +119,13 @@ def make_figure(counts: list[dict[str, Any]], note: str, out_dir: Path, name: st
     ax.set_axisbelow(True)
     width = 0.19
     for i, c in enumerate(cols):
-        if c["kind"] == "gap":
-            ax.axvspan(i - 0.45, i + 0.45, color=GRID, alpha=0.45, linewidth=0, zorder=0)
-            ax.text(i, n / 2, "no longer\nserved;\nnot tested", ha="center", va="center", fontsize=7.5, color=MUTED)
-            continue
-        if c["pro"]:
-            ax.axvspan(i - 0.45, i + 0.45, color=GRID, alpha=0.25, linewidth=0, zorder=0)
         for j, m in enumerate(MEASURES):
             x = i + (j - 1.5) * (width + 0.02)
             k = c[m]
             if k > 0:
-                ax.bar(x, k, width=width, color=SERIES[m], linewidth=0, zorder=2,
-                       hatch="////" if c["pro"] else None, edgecolor=SURFACE if c["pro"] else None)
+                ax.bar(x, k, width=width, color=SERIES[m], linewidth=0, zorder=2)
             ax.text(x, k + 0.05, str(k), ha="center", va="bottom", fontsize=7, color=INK_2)
-    ax.set_xticks(range(len(cols)), [f"{c['label']}\n{_month(c['released'])}" for c in cols], fontsize=7.5)
+    ax.set_xticks(range(len(cols)), [f"{c['label']}\n{_month(c['released'])}" for c in cols], fontsize=8)
     ax.set_xlim(-0.6, len(cols) - 0.4)
     ax.set_ylim(0, n + 0.6)
     ax.set_yticks(range(n + 1))
@@ -121,9 +133,9 @@ def make_figure(counts: list[dict[str, Any]], note: str, out_dir: Path, name: st
     ax.set_title("When did OpenAI's strongest models start finding Social Sanction Gaming?", loc="left",
                  fontsize=12, color=INK)
     handles = [Patch(color=SERIES[m], label=SERIES_LABEL[m]) for m in MEASURES]
-    handles += [Patch(facecolor=MUTED, hatch="////", edgecolor=SURFACE, label="Pro variant (shaded column)")]
-    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper left", labelcolor=INK_2, ncols=5)
-    lines = textwrap.wrap(note, 230)
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper left", labelcolor=INK_2, ncols=4)
+    note = " ".join([note, pro_note(counts), unavailable_note()])
+    lines = textwrap.wrap(note, 235)
     fig.tight_layout(rect=(0, 0.03 * len(lines), 1, 1))
     fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
     out_dir.mkdir(parents=True, exist_ok=True)
