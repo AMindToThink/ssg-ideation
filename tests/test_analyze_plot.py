@@ -145,7 +145,8 @@ def test_claude_labels_replace_judge_hits(fixture: tuple[dict[Any, Any], dict[An
     assert loose[(1, 2)]["first_ssg_rank"] == 3 and loose[(3, 1)]["first_ssg_rank"] == 2
     assert hit_counts(with_claude_labels(rows, reader), "gemini-4-argon")["turn1"] == 1
     paths = make_figure(with_claude_labels(rows, reader), tmp_path, name="claude")
-    assert [p.name for p in paths] == ["claude.png", "claude.pdf"]
+    assert [p.name for p in paths] == ["claude.png", "claude.pdf", "claude_rates.png", "claude_rates.pdf",
+                                       "claude_ranks.png", "claude_ranks.pdf"]
 
 
 def test_claude_columns_counts_and_report_order(fixture: tuple[dict[Any, Any], dict[Any, Any]], tmp_path: Path) -> None:

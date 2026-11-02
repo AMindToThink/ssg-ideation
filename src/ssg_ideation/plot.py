@@ -1,5 +1,7 @@
 """Figure: SSG hit rate per model (panel A) and per-generation rank strip (panel B).
 
+Each figure is also saved as two standalone images, <name>_rates and <name>_ranks.
+
 Models with no answered call (every conversation refused at turn 1) are left out
 of the figure and named in its footnote; they stay in summary.csv and report.md.
 
@@ -85,7 +87,7 @@ def models_in_order(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def panel_hit_rate(ax: Axes, rows: list[dict[str, Any]]) -> None:
+def panel_hit_rate(ax: Axes, rows: list[dict[str, Any]], letter: str = "A. ") -> None:
     models = models_in_order(rows)
     width = 0.17
     for j, series in enumerate(SERIES):
@@ -106,13 +108,13 @@ def panel_hit_rate(ax: Axes, rows: list[dict[str, Any]]) -> None:
     ax.set_ylim(0, N_GENERATIONS + 0.5)
     ax.set_yticks(range(N_GENERATIONS + 1))
     ax.set_ylabel("Conversations with an SSG idea", color=INK_2, fontsize=9)
-    ax.set_title("A. How often SSG appears, per turn", loc="left", fontsize=11, color=INK)
+    ax.set_title(f"{letter}How often SSG appears, per turn", loc="left", fontsize=11, color=INK)
     handles = [Line2D([], [], marker="s", linestyle="", markersize=8, color=SERIES[s], label=SERIES_LABEL[s])
                for s in SERIES]
     ax.legend(handles=handles, frameon=False, fontsize=8, loc="upper left", labelcolor=INK_2, ncols=2)
 
 
-def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
+def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]], letter: str = "B. ") -> None:
     models = models_in_order(rows)
     hits = [r for r in rows if r["hit"]]
     max_rank = max((r["first_ssg_rank"] for r in hits), default=1)
@@ -141,7 +143,7 @@ def panel_rank_strip(ax: Axes, rows: list[dict[str, Any]]) -> None:
     ax.set_xticks(range(len(models)), [label for _, label in models])
     ax.set_xlim(-0.6, len(models) - 0.4)
     ax.set_ylabel("Rank of first SSG idea in the response", color=INK_2, fontsize=9)
-    ax.set_title("B. Where SSG appears in each response (dot = one conversation-turn)", loc="left",
+    ax.set_title(f"{letter}Where SSG appears in each response (dot = one conversation-turn)", loc="left",
                  fontsize=11, color=INK)
     handles = [
         Line2D([], [], marker="o", linestyle="", markersize=8, color=SERIES["turn1"], label="Turn 1 hit"),
@@ -186,28 +188,44 @@ def with_claude_labels(
     return out
 
 
-def make_figure(
-    rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None, name: str = "ssg_ideation"
-) -> list[Path]:
+def _with_dropped_note(rows: list[dict[str, Any]], note: str | None) -> tuple[list[dict[str, Any]], str | None]:
     rows, dropped = drop_unanswered(rows)
     if dropped:
         note = " ".join(filter(None, [note, f"Not shown: {', '.join(dropped)} (every conversation "
                                             "was refused at turn 1; see report.md)."]))
+    return rows, note
+
+
+def _save(fig: plt.Figure, out_dir: Path, name: str, note: str | None, wrap: int, tight: bool = False) -> list[Path]:
+    lines = textwrap.wrap(note, wrap) if note else []
+    fig.tight_layout(rect=(0, 0.035 * len(lines) * 5.8 / fig.get_figheight(), 1, 1))
+    if lines:
+        fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = [out_dir / f"{name}.png", out_dir / f"{name}.pdf"]
+    for p in paths:
+        fig.savefig(p, dpi=200, facecolor=SURFACE, bbox_inches="tight" if tight else None)
+    plt.close(fig)
+    return paths
+
+
+def make_figure(
+    rows: list[dict[str, Any]], out_dir: Path = FIGURES_DIR, note: str | None = None, name: str = "ssg_ideation"
+) -> list[Path]:
+    """The two-panel figure <name>, plus each panel alone as <name>_rates and <name>_ranks."""
+    rows, note = _with_dropped_note(rows, note)
     fig, (a, b) = plt.subplots(1, 2, figsize=(15, 5.8), facecolor=SURFACE,
                                gridspec_kw={"width_ratios": [1, 1.35]})
     for ax in (a, b):
         _style(ax)
     panel_hit_rate(a, rows)
     panel_rank_strip(b, rows)
-    lines = textwrap.wrap(note, 180) if note else []
-    fig.tight_layout(rect=(0, 0.035 * len(lines), 1, 1))
-    if lines:
-        fig.text(0.01, 0.01, "\n".join(lines), fontsize=8, color=INK_2, ha="left", va="bottom")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    paths = [out_dir / f"{name}.png", out_dir / f"{name}.pdf"]
-    for p in paths:
-        fig.savefig(p, dpi=200, facecolor=SURFACE)
-    plt.close(fig)
+    paths = _save(fig, out_dir, name, note, 180)
+    for suffix, panel, width in (("rates", panel_hit_rate, 7.5), ("ranks", panel_rank_strip, 9.5)):
+        fig, ax = plt.subplots(figsize=(width, 5.8), facecolor=SURFACE)
+        _style(ax)
+        panel(ax, rows, letter="")
+        paths += _save(fig, out_dir, f"{name}_{suffix}", note, int(width * 12), tight=True)
     return paths
 
 
